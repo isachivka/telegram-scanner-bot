@@ -1,0 +1,28 @@
+{
+  "name": "scanner-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Telegram bot that triggers HP LaserJet MFP scans over SANE and stitches pages into a PDF",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@grammyjs/conversations": "^2.1.1",
+    "async-mutex": "^0.5.0",
+    "grammy": "^1.42.0",
+    "pino": "^9.14.0",
+    "pino-pretty": "^11.3.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

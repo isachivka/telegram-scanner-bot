@@ -1,0 +1,9 @@
+services:
+  scanner-bot:
+    build: .
+    container_name: scanner-bot
+    restart: unless-stopped
+    env_file: .env
+    network_mode: host
+    volumes:
+      - ./config/airscan.conf:/etc/sane.d/airscan.conf:ro
