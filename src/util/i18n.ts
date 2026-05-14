@@ -14,6 +14,14 @@ export const t = {
   unauthorized: (id: number) =>
     `Доступ запрещён.\nТвой Telegram user ID: ${id}\nДобавь его в ALLOWED_USER_IDS и перезапусти бота.`,
   busy: "Идёт сканирование, подожди.",
+  printPrompt: (copies: number) =>
+    `Режим печати.\nКопий: ${copies}\nПришли PDF-файл документом.`,
+  printSent: (jobId: string, copies: number) =>
+    `Отправлено в печать (job ${jobId}, копий: ${copies}).`,
+  printFailed: (err: string) => `Ошибка печати: ${err}`,
+  printNeedsPdf: "Пришли именно PDF-файл (как документ, не как фото).",
+  printTooLarge: (mb: number) =>
+    `Файл слишком большой (>${mb} MB). Telegram-бот не может его скачать.`,
 } as const;
 
 export const btn = {
@@ -24,4 +32,6 @@ export const btn = {
   toggleMode: (mode: string) =>
     mode === "Color" ? "🎨 Режим: цветной" : "⚫ Режим: серый",
   cycleDpi: (dpi: number) => `🔍 DPI: ${dpi}`,
+  startPrint: "🖨 Печать",
+  cycleCopies: (copies: number) => `🧮 Копий: ${copies}`,
 } as const;

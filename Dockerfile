@@ -7,7 +7,7 @@ RUN npm run build
 
 FROM node:lts-bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      sane-utils sane-airscan img2pdf ca-certificates \
+      sane-utils sane-airscan img2pdf cups-client ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package*.json ./

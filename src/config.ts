@@ -19,6 +19,7 @@ const schema = z.object({
         }),
     ),
   SCANNER_DEVICE: z.string().min(1),
+  PRINTER_QUEUE: z.string().min(1),
   LOG_LEVEL: z.string().default("info"),
 });
 
@@ -28,5 +29,6 @@ export const config = {
   botToken: parsed.TELEGRAM_BOT_TOKEN,
   allowedUserIds: new Set(parsed.ALLOWED_USER_IDS),
   scannerDevice: parsed.SCANNER_DEVICE,
+  printerQueue: parsed.PRINTER_QUEUE,
   logLevel: parsed.LOG_LEVEL,
 };
