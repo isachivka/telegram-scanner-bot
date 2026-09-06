@@ -7,6 +7,10 @@ updates:
     groups:
       all:
         patterns: ["*"]
+    ignore:
+      # typescript-eslint has to catch up before TypeScript majors can land.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -15,3 +19,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Stay on the current Node LTS line on purpose.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
