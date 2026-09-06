@@ -48,6 +48,9 @@ describe("loadConfig", () => {
       port: 8765,
       path: "/mcp",
       authToken: "0123456789abcdef",
+      publicUrl: undefined,
+      linkTtlMs: 7 * 24 * 3600 * 1000,
+      uploadMaxBytes: 50 * 1024 * 1024,
     });
   });
 

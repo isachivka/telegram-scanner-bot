@@ -22,6 +22,6 @@ COPY package.json ./
 COPY docker/entrypoint.sh /entrypoint.sh
 VOLUME ["/data/scans"]
 HEALTHCHECK --interval=60s --timeout=10s --start-period=20s --retries=3 \
-  CMD sh -c 'if [ -n "$MCP_HTTP_PORT" ]; then wget -qO- "http://127.0.0.1:$MCP_HTTP_PORT/healthz" >/dev/null; else node -e "process.exit(0)"; fi'
+  CMD sh -c 'if [ -n "$MCP_HTTP_PORT" ]; then node -e "fetch(\"http://127.0.0.1:$MCP_HTTP_PORT/healthz\").then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"; else exit 0; fi'
 ENTRYPOINT ["tini", "--", "/entrypoint.sh"]
 CMD []

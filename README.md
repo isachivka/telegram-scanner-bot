@@ -238,24 +238,68 @@ Things that work out of the box, in plain language:
 - _"Scan the letter on the scanner and tell me what it says and when the deadline is."_
 - _"Scan the whole stack in the feeder in greyscale at 200 dpi and save it as `rent-contract`."_
 - _"List my scans and delete everything older than last week."_
-- _"Print this PDF, two copies."_ (the agent reads the file and calls `print_file` with its bytes)
+- _"Print https://example.com/ticket.pdf, two copies."_ → `print_file` with `url`
+- _"Print `~/Downloads/contract.pdf`."_ → the agent uploads it with `curl -T` and calls `print_file` with `path` (see below)
 - _"Print a shopping list: milk, eggs, bread, coffee."_ → `print_text`
 - _"Is the printer online?"_ → `printer_status`
 
+### How files move (and why your context stays clean)
+
+Nothing is pushed through the agent's context unless the agent asks for it. Files travel as **links**:
+
+- `scan` stores `<name>.pdf` and the page images on the server and returns **signed URLs** for them:
+
+  ```
+  Scanned 2 page(s) at 300 dpi (Color).
+  rent-contract: 2 page(s), 412337 bytes
+  PDF: http://192.168.1.10:8765/files/rent-contract.pdf?exp=1758000000&sig=9f3c…
+  page 1: http://192.168.1.10:8765/files/rent-contract/page_001.jpg?exp=…&sig=…
+  page 2: http://192.168.1.10:8765/files/rent-contract/page_002.jpg?exp=…&sig=…
+  ```
+
+  A signed link needs **no auth header**: paste it into a browser, `curl -O` it, hand it to the user, put it in a message. It cannot be forged (HMAC with the MCP token) and expires after `FILE_LINK_TTL_SEC` (7 days by default). With the bearer header you can also fetch `/files/<path>` without a signature.
+
+- To **read** a scan, the agent asks for images explicitly — `get_scan` with `as=images` (optionally one `page`), or `include_images=true` on `scan`. That is the only time image bytes enter the context.
+
+- `print_file` takes a **`url`** (anything http(s) the server can reach, including its own links — those are resolved locally without a download), a **`path`** on the server (a scan's `pdf_path`, or `uploads/<name>`), or, as a last resort for tiny files, `content_base64`.
+
+- To print a file that lives on the **agent's machine**, upload it first — one `curl`, no base64:
+
+  ```bash
+  curl -T ~/Downloads/contract.pdf \
+    -H "Authorization: Bearer <MCP_AUTH_TOKEN>" \
+    http://<server-ip>:8765/files/uploads/contract.pdf
+  ```
+
+  ```json
+  {
+    "path": "uploads/contract.pdf",
+    "server_path": "/data/scans/uploads/contract.pdf",
+    "bytes": 184233,
+    "url": "http://<server-ip>:8765/files/uploads/contract.pdf?exp=…&sig=…"
+  }
+  ```
+
+  then `print_file` with `path: "uploads/contract.pdf"`. Agents that can run shell commands (Claude Code, Codex) do this on their own once they see the tool description. Uploads are capped at `UPLOAD_MAX_MB` (50).
+
+Links use the host the client connected through (`192.168.1.10:8765` above). Behind a reverse proxy or a DNS name, set `PUBLIC_URL=https://scanner.example.net` so links point where clients can reach.
+
 Under the hood the agent sees these tools:
 
-| Tool             | Purpose                                                                                                                                                                                                                                                   |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scan`           | Scan the glass (`source=flatbed`, default) or the whole feeder (`source=feeder`). Stores `<name>.pdf` + page images on the server, returns the page images inline (first 10) so the agent can read them. Params: `mode`, `dpi`, `name`, `include_images`. |
-| `list_scans`     | Stored scans, newest first.                                                                                                                                                                                                                               |
-| `get_scan`       | A stored scan as page images (`as=images`, optional `page`) or as the PDF bytes (`as=pdf`).                                                                                                                                                               |
-| `delete_scan`    | Remove a stored scan.                                                                                                                                                                                                                                     |
-| `list_scanners`  | `scanimage -L` — what SANE sees and which device is configured.                                                                                                                                                                                           |
-| `printer_status` | `lpstat -p` for the configured queue. _(printer only)_                                                                                                                                                                                                    |
-| `print_file`     | Print a PDF / image / text file by server path (e.g. a scan's `pdf_path`) or as base64 bytes with a filename. _(printer only)_                                                                                                                            |
-| `print_text`     | Print plain text — notes, lists, letters. _(printer only)_                                                                                                                                                                                                |
+| Tool             | Purpose                                                                                                                                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scan`           | Scan the glass (`source=flatbed`, default) or the whole feeder (`source=feeder`). Stores `<name>.pdf` + page images on the server, returns download links and paths; `include_images=true` also inlines the first 10 pages. Params: `mode`, `dpi`, `name`. |
+| `list_scans`     | Stored scans, newest first, with links.                                                                                                                                                                                                                    |
+| `get_scan`       | A stored scan as links (`as=links`, default), page images (`as=images`, optional `page`), or PDF bytes (`as=pdf`).                                                                                                                                         |
+| `delete_scan`    | Remove a stored scan.                                                                                                                                                                                                                                      |
+| `list_scanners`  | `scanimage -L` — what SANE sees and which device is configured.                                                                                                                                                                                            |
+| `printer_status` | `lpstat -p` for the configured queue. _(printer only)_                                                                                                                                                                                                     |
+| `print_file`     | Print a PDF / image / text file by `url`, server `path`, or (small files) base64. Images are wrapped into a PDF. _(printer only)_                                                                                                                          |
+| `print_text`     | Print plain text — notes, lists, letters. _(printer only)_                                                                                                                                                                                                 |
 
-Stored scans are also exposed as MCP resources (`scan://<name>.pdf`). They live in the `scans` volume (`SCAN_OUTPUT_DIR`, default `/data/scans`), so `docker compose down` doesn't lose them.
+HTTP routes on the same port: `POST/GET/DELETE /mcp` (MCP, bearer), `GET /files/<path>?exp&sig` (signed download, or bearer), `PUT /files/uploads/<name>` (upload, bearer), `GET /healthz`.
+
+Stored scans are also exposed as MCP resources (`scan://<name>.pdf`). They and the uploads live in the `scans` volume (`SCAN_OUTPUT_DIR`, default `/data/scans`), so `docker compose down` doesn't lose them.
 
 ### MCP without Telegram
 
@@ -274,7 +318,8 @@ Or without Docker, from a checkout: `npm ci && npm run build && node dist/index.
 
 ### Security notes
 
-- Bearer token on every request, compared in constant time. No token, no start.
+- Bearer token on every MCP request and on uploads, compared in constant time. No token, no start.
+- Download links are HMAC-signed with the token and expire; a leaked link exposes one file until `FILE_LINK_TTL_SEC` runs out, never the token.
 - Plain HTTP. Keep it on your LAN / VPN (Tailscale, WireGuard) or put a TLS-terminating reverse proxy in front; don't expose it to the internet as-is.
 - `print_file` with a `path` prints any file the container can read. The container only sees its own filesystem and the `scans` volume — don't mount things you wouldn't want printed.
 - Rotate the token by changing `MCP_AUTH_TOKEN` and restarting; clients need the new value.

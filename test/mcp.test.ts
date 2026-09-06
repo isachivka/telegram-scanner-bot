@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -65,15 +66,20 @@ describe("mcp server", () => {
     const { client, close } = await connect(sb);
     const res = (await client.callTool({
       name: "scan",
-      arguments: { mode: "Gray", dpi: 200, name: "invoice" },
+      arguments: { mode: "Gray", dpi: 200, name: "invoice", include_images: true },
     })) as CallToolResult;
     expect(res.isError).toBeFalsy();
     expect(textOf(res)).toMatch(
-      /^Scanned 1 page\(s\) at 200 dpi \(Gray\)\. Stored as .*invoice\.pdf/,
+      /^Scanned 1 page\(s\) at 200 dpi \(Gray\)\.\ninvoice: 1 page\(s\), \d+ bytes\nPDF: .*invoice\.pdf \(on the server\)$/,
     );
     const image = res.content.find((c) => c.type === "image");
     expect(image).toMatchObject({ type: "image", mimeType: "image/jpeg" });
-    expect(res.structuredContent).toMatchObject({ name: "invoice", pages: 1 });
+    expect(res.structuredContent).toMatchObject({
+      name: "invoice",
+      pages: 1,
+      page_urls: [],
+    });
+    expect((res.structuredContent as { pdf_url?: string }).pdf_url).toBeUndefined();
     const pdfPath = (res.structuredContent as { pdf_path: string }).pdf_path;
     expect(pdfPath).toBe(path.join(sb.config.mcp.outputDir, "invoice.pdf"));
     expect((await stat(pdfPath)).size).toBeGreaterThan(0);
@@ -89,7 +95,7 @@ describe("mcp server", () => {
     const { client, close } = await connect(sb);
     const res = (await client.callTool({
       name: "scan",
-      arguments: { source: "feeder" },
+      arguments: { source: "feeder", include_images: true },
     })) as CallToolResult;
     expect(res.isError).toBeFalsy();
     expect(res.content.filter((c) => c.type === "image")).toHaveLength(10);
@@ -102,13 +108,11 @@ describe("mcp server", () => {
     await close();
   });
 
-  it("can skip inline images and reports scanner errors and an empty feeder", async () => {
+  it("returns no images by default and reports scanner errors and an empty feeder", async () => {
     const { client, close } = await connect(sb);
-    let res = (await client.callTool({
-      name: "scan",
-      arguments: { include_images: false },
-    })) as CallToolResult;
+    let res = (await client.callTool({ name: "scan", arguments: {} })) as CallToolResult;
     expect(res.content.some((c) => c.type === "image")).toBe(false);
+    expect(res.content).toHaveLength(1);
 
     process.env.FAKE_ADF_PAGES = "0";
     process.env.FAKE_ADF_EXIT7 = "1";
@@ -165,9 +169,19 @@ describe("mcp server", () => {
     expect(scans.map((s) => s.name).sort()).toEqual(["a", "b"]);
     expect(scans[0]).toMatchObject({ pages: 1 });
 
-    const images = (await client.callTool({
+    const linksOnly = (await client.callTool({
       name: "get_scan",
       arguments: { name: "a" },
+    })) as CallToolResult;
+    expect(linksOnly.content).toHaveLength(1);
+    expect(textOf(linksOnly)).toMatch(
+      /^a: 1 page\(s\), \d+ bytes\nPDF: .*a\.pdf \(on the server\)$/,
+    );
+    expect(linksOnly.structuredContent).toMatchObject({ name: "a", pages: 1 });
+
+    const images = (await client.callTool({
+      name: "get_scan",
+      arguments: { name: "a", as: "images" },
     })) as CallToolResult;
     expect(images.content.filter((c) => c.type === "image")).toHaveLength(1);
 
@@ -331,6 +345,16 @@ describe("mcp over http", () => {
     };
   }
 
+  async function connectHttp(url: string, token = TOKEN) {
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(url), {
+        requestInit: { headers: { authorization: `Bearer ${token}` } },
+      }),
+    );
+    return client;
+  }
+
   it("requires the bearer token and serves tools to authenticated clients", async () => {
     await sb.cleanup();
     sb = await createSandbox({ MCP_HTTP_PORT: "1", MCP_AUTH_TOKEN: TOKEN });
@@ -355,22 +379,236 @@ describe("mcp over http", () => {
       });
       expect(wrong.status).toBe(401);
 
-      const client = new Client({ name: "test", version: "0" });
-      await client.connect(
-        new StreamableHTTPClientTransport(new URL(url), {
-          requestInit: { headers: { authorization: `Bearer ${TOKEN}` } },
-        }),
-      );
+      const client = await connectHttp(url);
       const tools = (await client.listTools()).tools.map((t) => t.name);
       expect(tools).toContain("scan");
-      const res = (await client.callTool({
-        name: "scan",
-        arguments: { include_images: false, name: "http" },
-      })) as CallToolResult;
-      expect(res.isError).toBeFalsy();
-      expect(res.structuredContent).toMatchObject({ name: "http", pages: 1 });
       await client.close();
     } finally {
+      await close();
+    }
+  });
+
+  it("returns signed links for scans that work without the bearer header", async () => {
+    await sb.cleanup();
+    sb = await createSandbox({
+      MCP_HTTP_PORT: "1",
+      MCP_AUTH_TOKEN: TOKEN,
+      FILE_LINK_TTL_SEC: "60",
+    });
+    const { url, base, close } = await listen(sb);
+    try {
+      const client = await connectHttp(url);
+      const res = (await client.callTool({
+        name: "scan",
+        arguments: { name: "http" },
+      })) as CallToolResult;
+      expect(res.isError).toBeFalsy();
+      const d = res.structuredContent as { pdf_url: string; page_urls: string[] };
+      expect(d.pdf_url).toMatch(
+        new RegExp(`^${base}/files/http\\.pdf\\?exp=\\d+&sig=[0-9a-f]{64}$`),
+      );
+      expect(d.page_urls).toHaveLength(1);
+      expect(d.page_urls[0]).toMatch(
+        new RegExp(`^${base}/files/http/page_001\\.jpg\\?exp=`),
+      );
+      expect(textOf(res)).toContain(`PDF: ${d.pdf_url}`);
+      expect(textOf(res)).toContain(`page 1: ${d.page_urls[0]}`);
+
+      // Signed link: no auth header needed, right content type.
+      const pdf = await fetch(d.pdf_url);
+      expect(pdf.status).toBe(200);
+      expect(pdf.headers.get("content-type")).toBe("application/pdf");
+      expect(pdf.headers.get("content-disposition")).toBe('inline; filename="http.pdf"');
+      expect(await pdf.text()).toMatch(/^%PDF/);
+      const jpg = await fetch(d.page_urls[0]!);
+      expect(jpg.status).toBe(200);
+      expect(jpg.headers.get("content-type")).toBe("image/jpeg");
+      expect((await fetch(d.pdf_url, { method: "HEAD" })).status).toBe(200);
+
+      // Tampered, expired, missing, and traversal.
+      expect(
+        (await fetch(d.pdf_url.replace(/sig=[0-9a-f]+/, `sig=${"0".repeat(64)}`))).status,
+      ).toBe(403);
+      const expired = d.pdf_url.replace(/exp=\d+/, "exp=1000000000");
+      expect((await fetch(expired)).status).toBe(403);
+      expect((await fetch(`${base}/files/http.pdf`)).status).toBe(401);
+      expect((await fetch(`${base}/files/nope.pdf?exp=9999999999&sig=x`)).status).toBe(
+        403,
+      );
+      expect((await fetch(`${base}/files/..%2F..%2Fetc%2Fpasswd`)).status).toBe(400);
+      // Bearer header works instead of a signature.
+      const viaBearer = await fetch(`${base}/files/http.pdf`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      expect(viaBearer.status).toBe(200);
+      expect(
+        (
+          await fetch(`${base}/files/missing.pdf`, {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          })
+        ).status,
+      ).toBe(404);
+
+      // list_scans and get_scan carry the same links.
+      const list = (await client.callTool({
+        name: "list_scans",
+        arguments: {},
+      })) as CallToolResult;
+      expect(
+        (list.structuredContent as { scans: { pdf_url: string }[] }).scans[0]!.pdf_url,
+      ).toMatch(/\/files\/http\.pdf\?exp=/);
+      const get = (await client.callTool({
+        name: "get_scan",
+        arguments: { name: "http" },
+      })) as CallToolResult;
+      expect(textOf(get)).toMatch(
+        /^http: 1 page\(s\).*\nPDF: http:\/\/127\.0\.0\.1:\d+\/files\/http\.pdf\?exp=/,
+      );
+      await client.close();
+    } finally {
+      await close();
+    }
+  });
+
+  it("honours PUBLIC_URL and X-Forwarded-Proto for link origins", async () => {
+    await sb.cleanup();
+    sb = await createSandbox({
+      MCP_HTTP_PORT: "1",
+      MCP_AUTH_TOKEN: TOKEN,
+      PUBLIC_URL: "https://scanner.example.net/",
+    });
+    const { url, close } = await listen(sb);
+    try {
+      const client = await connectHttp(url);
+      const res = (await client.callTool({
+        name: "scan",
+        arguments: { name: "pub" },
+      })) as CallToolResult;
+      expect((res.structuredContent as { pdf_url: string }).pdf_url).toMatch(
+        /^https:\/\/scanner\.example\.net\/files\/pub\.pdf\?exp=/,
+      );
+      await client.close();
+    } finally {
+      await close();
+    }
+  });
+
+  it("accepts uploads and prints by path, own link, and external url", async () => {
+    await sb.cleanup();
+    sb = await createSandbox({
+      MCP_HTTP_PORT: "1",
+      MCP_AUTH_TOKEN: TOKEN,
+      UPLOAD_MAX_MB: "0.001",
+    });
+    const { url, base, close } = await listen(sb);
+    // A third-party file server the bot should be able to download from.
+    const external = createServer((req, res) => {
+      if (req.url === "/doc.pdf") {
+        res
+          .writeHead(200, { "content-type": "application/pdf" })
+          .end("%PDF-1.4 external");
+      } else if (req.url === "/noext") {
+        res.writeHead(200, { "content-type": "image/png" }).end("png-bytes");
+      } else {
+        res.writeHead(404).end();
+      }
+    });
+    await new Promise<void>((r) => external.listen(0, "127.0.0.1", r));
+    const extBase = `http://127.0.0.1:${(external.address() as AddressInfo).port}`;
+    try {
+      // Upload needs the bearer and must target uploads/<name>.
+      expect(
+        (
+          await fetch(`${base}/files/uploads/a.pdf`, {
+            method: "PUT",
+            body: "%PDF-1.4 up",
+          })
+        ).status,
+      ).toBe(401);
+      expect(
+        (
+          await fetch(`${base}/files/other/a.pdf`, {
+            method: "PUT",
+            headers: { authorization: `Bearer ${TOKEN}` },
+            body: "%PDF-1.4 up",
+          })
+        ).status,
+      ).toBe(400);
+      const tooBig = await fetch(`${base}/files/uploads/big.pdf`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        body: Buffer.alloc(5000),
+      });
+      expect(tooBig.status).toBe(413);
+      const up = await fetch(`${base}/files/uploads/a.pdf`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        body: "%PDF-1.4 up",
+      });
+      expect(up.status).toBe(201);
+      const uploaded = (await up.json()) as { path: string; url: string; bytes: number };
+      expect(uploaded).toMatchObject({ path: "uploads/a.pdf", bytes: 11 });
+      expect(uploaded.url).toMatch(new RegExp(`^${base}/files/uploads/a\\.pdf\\?exp=`));
+      expect(await (await fetch(uploaded.url)).text()).toBe("%PDF-1.4 up");
+
+      const client = await connectHttp(url);
+      // by relative path
+      let res = (await client.callTool({
+        name: "print_file",
+        arguments: { path: "uploads/a.pdf", copies: 2 },
+      })) as CallToolResult;
+      expect(res.isError).toBeFalsy();
+      expect((await sb.calls()).at(-1)).toBe(
+        `lp -d FakeQueue -n 2 -- ${sb.config.mcp.outputDir}/uploads/a.pdf`,
+      );
+      // by our own signed link: resolved locally, no download
+      res = (await client.callTool({
+        name: "print_file",
+        arguments: { url: uploaded.url },
+      })) as CallToolResult;
+      expect(res.isError).toBeFalsy();
+      expect(textOf(res)).toMatch(/^sent a\.pdf to FakeQueue: job FakeQueue-42, 1 copy$/);
+      expect((await sb.calls()).at(-1)).toBe(
+        `lp -d FakeQueue -n 1 -- ${sb.config.mcp.outputDir}/uploads/a.pdf`,
+      );
+      // by external url
+      res = (await client.callTool({
+        name: "print_file",
+        arguments: { url: `${extBase}/doc.pdf` },
+      })) as CallToolResult;
+      expect(res.isError).toBeFalsy();
+      expect((await sb.calls()).at(-1)).toMatch(
+        /^lp -d FakeQueue -n 1 -- .*mcp-prints\/[0-9a-f-]+\/doc\.pdf$/,
+      );
+      // extension inferred from content-type, image wrapped into a PDF
+      res = (await client.callTool({
+        name: "print_file",
+        arguments: { url: `${extBase}/noext` },
+      })) as CallToolResult;
+      expect(res.isError).toBeFalsy();
+      expect((await sb.calls()).at(-2)).toMatch(
+        /^img2pdf .*noext\.png -o .*noext\.png\.pdf$/,
+      );
+      // 404 upstream
+      res = (await client.callTool({
+        name: "print_file",
+        arguments: { url: `${extBase}/missing.pdf` },
+      })) as CallToolResult;
+      expect(res.isError).toBe(true);
+      expect(textOf(res)).toMatch(/HTTP 404/);
+      // a scan's pdf_path still works
+      const scan = (await client.callTool({
+        name: "scan",
+        arguments: { name: "s" },
+      })) as CallToolResult;
+      res = (await client.callTool({
+        name: "print_file",
+        arguments: { path: (scan.structuredContent as { pdf_path: string }).pdf_path },
+      })) as CallToolResult;
+      expect(res.isError).toBeFalsy();
+      await client.close();
+    } finally {
+      external.close();
       await close();
     }
   });

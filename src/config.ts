@@ -83,6 +83,13 @@ const schema = z.object({
   MCP_HTTP_HOST: z.string().default("0.0.0.0"),
   MCP_HTTP_PATH: z.string().default("/mcp"),
   MCP_AUTH_TOKEN: optionalString,
+  PUBLIC_URL: optionalString,
+  FILE_LINK_TTL_SEC: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(7 * 24 * 3600),
+  UPLOAD_MAX_MB: z.coerce.number().positive().default(50),
 
   LOG_LEVEL: z.string().default("info"),
 });
@@ -101,6 +108,11 @@ export interface Config {
       port: number;
       path: string;
       authToken: string;
+      /** Base URL clients should use to reach this server (for links); derived from the Host header when unset. */
+      publicUrl?: string;
+      /** How long signed download links stay valid. */
+      linkTtlMs: number;
+      uploadMaxBytes: number;
     };
   };
   scanner: {
@@ -179,6 +191,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!p.MCP_HTTP_PATH.startsWith("/")) {
     throw new ConfigError("MCP_HTTP_PATH must start with /");
   }
+  if (p.PUBLIC_URL && !/^https?:\/\//.test(p.PUBLIC_URL)) {
+    throw new ConfigError("PUBLIC_URL must start with http:// or https://");
+  }
 
   return {
     telegram: p.TELEGRAM_BOT_TOKEN
@@ -197,6 +212,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
               port: p.MCP_HTTP_PORT,
               path: p.MCP_HTTP_PATH,
               authToken: p.MCP_AUTH_TOKEN!,
+              publicUrl: p.PUBLIC_URL?.replace(/\/+$/, ""),
+              linkTtlMs: p.FILE_LINK_TTL_SEC * 1000,
+              uploadMaxBytes: Math.round(p.UPLOAD_MAX_MB * 1024 * 1024),
             }
           : undefined,
     },
