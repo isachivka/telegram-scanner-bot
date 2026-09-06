@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
 RUN npm ci
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     SCAN_TMP_DIR=/tmp/scanner-bot \
     SCAN_OUTPUT_DIR=/data/scans
