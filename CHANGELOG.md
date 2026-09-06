@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0 — 2026-09-06
+
+- `ALLOWED_CHAT_IDS`: group chats where every member may use the bot. In other groups strangers are ignored silently instead of being told their ID; `/status` in a group shows the chat ID.
+- One scan session per person per chat, so several people can scan in the same group.
+
 ## 1.0.0 — 2026-09-06
 
 First public release.

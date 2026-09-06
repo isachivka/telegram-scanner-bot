@@ -1,8 +1,13 @@
+import type { Chat } from "grammy/types";
 import type { Services } from "../core/services.js";
 import type { Dictionary } from "./i18n/index.js";
 import { errorMessage } from "../util/exec.js";
 
-export async function statusReport(services: Services, t: Dictionary): Promise<string> {
+export async function statusReport(
+  services: Services,
+  t: Dictionary,
+  chat?: Chat,
+): Promise<string> {
   const { config, scanner, printer, sessions } = services;
   const lines: string[] = [t.status.header, ""];
 
@@ -31,5 +36,9 @@ export async function statusReport(services: Services, t: Dictionary): Promise<s
   }
 
   lines.push("", t.status.activeSessions(sessions.size));
+  if (chat && chat.type !== "private") {
+    const allowed = config.telegram?.allowedChatIds.has(chat.id) ?? false;
+    lines.push("", t.status.chat(chat.id, allowed));
+  }
   return lines.join("\n");
 }

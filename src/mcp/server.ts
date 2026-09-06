@@ -17,7 +17,7 @@ import { FileLinks, UPLOADS_DIR } from "./files.js";
 import { ScanStore, type StoredScan } from "./store.js";
 
 export const MCP_SERVER_NAME = "scanner-bot";
-export const MCP_SERVER_VERSION = "1.0.0";
+export const MCP_SERVER_VERSION = "1.1.0";
 
 /** Inline more pages than this and the response becomes too large for most clients. */
 const MAX_INLINE_PAGES = 10;

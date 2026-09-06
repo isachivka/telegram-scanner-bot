@@ -7,6 +7,11 @@ describe("loadConfig", () => {
     const c = loadConfig(baseEnv());
     expect(c.telegram?.language).toBe("en");
     expect(c.telegram?.allowedUserIds).toEqual(new Set([1001]));
+    expect(c.telegram?.allowedChatIds).toEqual(new Set());
+    expect(
+      loadConfig(baseEnv({ ALLOWED_CHAT_IDS: "-1001234567890, -42" })).telegram
+        ?.allowedChatIds,
+    ).toEqual(new Set([-1001234567890, -42]));
     expect(c.scanner.device).toBe("airscan:e0:Scanner");
     expect(c.scanner.modes).toEqual(["Color", "Gray"]);
     expect(c.scanner.defaultMode).toBe("Color");

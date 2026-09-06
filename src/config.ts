@@ -55,6 +55,21 @@ const schema = z.object({
         return n;
       }),
     ),
+  ALLOWED_CHAT_IDS: z
+    .string()
+    .default("")
+    .transform((raw, ctx) =>
+      csv(raw).map((s) => {
+        const n = Number(s);
+        if (!Number.isInteger(n)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `ALLOWED_CHAT_IDS contains a non-integer: "${s}"`,
+          });
+        }
+        return n;
+      }),
+    ),
   BOT_LANGUAGE: z.enum(LANGUAGES).default("en"),
 
   SCANNER_URL: optionalString,
@@ -97,7 +112,10 @@ const schema = z.object({
 export interface Config {
   telegram?: {
     botToken: string;
+    /** Users allowed anywhere (private chats and any group). */
     allowedUserIds: Set<number>;
+    /** Group chats where every member may use the bot. */
+    allowedChatIds: Set<number>;
     language: Language;
   };
   mcp: {
@@ -200,6 +218,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ? {
           botToken: p.TELEGRAM_BOT_TOKEN,
           allowedUserIds: new Set(p.ALLOWED_USER_IDS),
+          allowedChatIds: new Set(p.ALLOWED_CHAT_IDS),
           language: p.BOT_LANGUAGE,
         }
       : undefined,
@@ -247,7 +266,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 export function describeConfig(c: Config): Record<string, unknown> {
   return {
     telegram: c.telegram
-      ? { language: c.telegram.language, allowedUserIds: [...c.telegram.allowedUserIds] }
+      ? {
+          language: c.telegram.language,
+          allowedUserIds: [...c.telegram.allowedUserIds],
+          allowedChatIds: [...c.telegram.allowedChatIds],
+        }
       : undefined,
     mcp: {
       outputDir: c.mcp.outputDir,

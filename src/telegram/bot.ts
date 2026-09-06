@@ -1,4 +1,10 @@
-import { Bot, GrammyError, HttpError, type BotConfig } from "grammy";
+import {
+  Bot,
+  GrammyError,
+  HttpError,
+  MemorySessionStorage,
+  type BotConfig,
+} from "grammy";
 import { conversations, createConversation } from "@grammyjs/conversations";
 import type { Services } from "../core/services.js";
 import { getDictionary } from "./i18n/index.js";
@@ -46,7 +52,20 @@ export function createBot(
     await next();
   });
   bot.use(allowlist(env));
-  bot.use(conversations<BotContext, ConvContext>());
+  // One conversation per person per chat, so two family members in the same
+  // group can each run their own scan session.
+  bot.use(
+    conversations<BotContext, ConvContext>({
+      storage: {
+        type: "key",
+        getStorageKey: (ctx) =>
+          ctx.chatId !== undefined && ctx.from
+            ? `${ctx.chatId}:${ctx.from.id}`
+            : undefined,
+        adapter: new MemorySessionStorage(),
+      },
+    }),
+  );
 
   const showMainMenu = (ctx: BotContext) =>
     ctx.reply(t.welcome, { reply_markup: mainMenuKb(t, kb) });
@@ -57,7 +76,7 @@ export function createBot(
     await showMainMenu(ctx);
   });
   bot.command("status", async (ctx) => {
-    await ctx.reply(await statusReport(services, t));
+    await ctx.reply(await statusReport(services, t, ctx.chat));
   });
 
   bot.use(createConversation(scanSession(env), SCAN_CONVERSATION));

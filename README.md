@@ -146,6 +146,8 @@ docker compose pull && docker compose up -d
 
 Anyone not in `ALLOWED_USER_IDS` is refused and shown their ID, so onboarding a family member is: they press `/start`, you add the ID, restart.
 
+**Group chats.** Add the bot to a family group and it sends the PDFs there. Allowed users work in any group. To let _everyone_ in a group use the bot, send `/status` in it (as an allowed user) — it shows the chat ID — and put that into `ALLOWED_CHAT_IDS`. In groups the bot never answers strangers, so it can't be used to enumerate IDs or spam. Each person gets their own scan session, so two people can scan in the same group without mixing pages. Note: Telegram's [privacy mode](https://core.telegram.org/bots/features#privacy-mode) only lets the bot see commands and button presses in groups, which is all it needs; sending a file to print in a group requires disabling privacy mode via @BotFather or replying to a bot message.
+
 ## Using it from an AI agent (MCP)
 
 The container can serve the [Model Context Protocol](https://modelcontextprotocol.io) over HTTP. Claude Code, Codex, Cursor, Claude Desktop — anything that can talk to a remote MCP server — then gets tools to scan and print. Scanned pages come back **as images**, so the agent reads the document it just scanned.

@@ -126,29 +126,30 @@ function harness(sb: Sandbox, opts: { fetchImpl?: typeof fetch } = {}) {
     download: { apiRoot: "http://telegram.test", fetchImpl: opts.fetchImpl },
   });
 
-  const text = (t: string) =>
+  type Override = { from?: typeof USER; chat?: object };
+  const text = (t: string, o: Override = {}) =>
     bot.handleUpdate({
       update_id: nextUpdateId++,
       message: {
         message_id: nextMessageId++,
         date: 0,
-        chat: CHAT,
-        from: USER,
+        chat: o.chat ?? CHAT,
+        from: o.from ?? USER,
         text: t,
         entities: t.startsWith("/")
           ? [{ type: "bot_command", offset: 0, length: t.length }]
           : [],
       },
     } as Update);
-  const press = (data: string, messageId = 100) =>
+  const press = (data: string, o: Override = {}) =>
     bot.handleUpdate({
       update_id: nextUpdateId++,
       callback_query: {
         id: String(nextUpdateId),
-        from: USER,
+        from: o.from ?? USER,
         chat_instance: "x",
         data,
-        message: { message_id: messageId, date: 0, chat: CHAT, text: "" },
+        message: { message_id: 100, date: 0, chat: o.chat ?? CHAT, text: "" },
       },
     } as Update);
   const document = (doc: {
@@ -446,6 +447,71 @@ describe("telegram bot", () => {
     expect(h.last("editMessageText")?.payload.text).toMatch(
       /^Print failed: lp exited with code 1: lp: The printer or class does not exist\./,
     );
+  });
+
+  describe("groups", () => {
+    const GROUP = { id: -1001234567890, type: "supergroup" as const, title: "Family" };
+    const STRANGER = { id: 555, is_bot: false, first_name: "Stranger" };
+
+    it("lets allowed users work in any group and ignores strangers silently", async () => {
+      const h = harness(sb);
+      await h.text("/start", { chat: GROUP });
+      expect(h.last("sendMessage")?.payload.chat_id).toBe(GROUP.id);
+      h.calls.length = 0;
+      await h.text("/start", { chat: GROUP, from: STRANGER });
+      await h.press("main:scan", { chat: GROUP, from: STRANGER });
+      expect(h.calls.map((c) => c.method)).toEqual(["answerCallbackQuery"]);
+    });
+
+    it("lets everyone in an allowed chat use the bot", async () => {
+      await sb.cleanup();
+      sb = await createSandbox({ ALLOWED_CHAT_IDS: String(GROUP.id) });
+      const h = harness(sb);
+      await h.text("/start", { chat: GROUP, from: STRANGER });
+      expect(h.last("sendMessage")?.payload.text).toMatch(/^Hi!/);
+      // ...but not in private, and not in other groups.
+      h.calls.length = 0;
+      await h.text("/start", {
+        from: STRANGER,
+        chat: { id: 555, type: "private", first_name: "S" },
+      });
+      expect(h.last("sendMessage")?.payload.text).toMatch(/Access denied.*555/s);
+      h.calls.length = 0;
+      await h.text("/start", {
+        from: STRANGER,
+        chat: { id: -42, type: "group", title: "Other" },
+      });
+      expect(h.calls).toEqual([]);
+    });
+
+    it("keeps one scan session per person in a shared group", async () => {
+      await sb.cleanup();
+      sb = await createSandbox({ ALLOWED_CHAT_IDS: String(GROUP.id) });
+      const h = harness(sb);
+      await h.text("/start", { chat: GROUP });
+      await h.press("main:scan", { chat: GROUP });
+      await h.press("scan:page", { chat: GROUP });
+      await h.text("/start", { chat: GROUP, from: STRANGER });
+      await h.press("main:scan", { chat: GROUP, from: STRANGER });
+      await h.press("scan:page", { chat: GROUP, from: STRANGER });
+      await h.press("scan:page", { chat: GROUP, from: STRANGER });
+      expect(sb.services.sessions.size).toBe(2);
+      await h.press("scan:finish", { chat: GROUP });
+      expect(h.last("sendDocument")?.payload.caption).toBe("Done, 1 page(s).");
+      await h.press("scan:finish", { chat: GROUP, from: STRANGER });
+      expect(h.last("sendDocument")?.payload.caption).toBe("Done, 2 page(s).");
+      expect(sb.services.sessions.size).toBe(0);
+    });
+
+    it("/status shows the chat id in groups", async () => {
+      const h = harness(sb);
+      await h.text("/status", { chat: GROUP });
+      expect(h.last("sendMessage")?.payload.text).toContain(
+        "This chat's ID: -1001234567890. Add it to ALLOWED_CHAT_IDS",
+      );
+      await h.text("/status");
+      expect(h.last("sendMessage")?.payload.text).not.toContain("chat");
+    });
   });
 
   it("answers stale buttons by re-showing the menu", async () => {

@@ -56,6 +56,10 @@ export const ru: Dictionary = {
     printerError: (err) => `Принтер: ошибка (${err})`,
     printerNone: "Принтер: не настроен",
     activeSessions: (n) => `Активных сессий сканирования: ${n}`,
+    chat: (id, allowed) =>
+      allowed
+        ? `Этот чат (${id}) в ALLOWED_CHAT_IDS: ботом могут пользоваться все участники.`
+        : `ID этого чата: ${id}. Добавь его в ALLOWED_CHAT_IDS, чтобы ботом могли пользоваться все участники.`,
   },
 
   btn: {

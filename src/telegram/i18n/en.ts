@@ -49,6 +49,10 @@ export const en = {
     printerError: (err: string) => `Printer: error (${err})`,
     printerNone: "Printer: not configured",
     activeSessions: (n: number) => `Active scan sessions: ${n}`,
+    chat: (id: number, allowed: boolean) =>
+      allowed
+        ? `This chat (${id}) is in ALLOWED_CHAT_IDS: everyone here may use the bot.`
+        : `This chat's ID: ${id}. Add it to ALLOWED_CHAT_IDS to let everyone here use the bot.`,
   },
 
   btn: {
