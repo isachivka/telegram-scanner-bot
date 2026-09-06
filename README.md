@@ -17,9 +17,11 @@ Turn the network scanner and printer you already own into a service you can driv
 └──────────────┘               └───────────────────────┘                 └───────────┘
 ```
 
-## Quick start
+## Install (5 minutes)
 
-Requirements: Docker on a machine on the same LAN as the scanner (a Raspberry Pi, a NAS, a home server — the image is built for amd64 and arm64).
+You need Docker on any always-on box on the same LAN as the scanner: a Raspberry Pi, a NAS, a mini PC, the router if it runs containers. The image is built for `amd64` and `arm64`.
+
+### 1. Get the files
 
 ```bash
 mkdir scanner-bot && cd scanner-bot
@@ -27,68 +29,220 @@ curl -LO https://raw.githubusercontent.com/isachivka/telegram-scanner-bot/main/d
 curl -Lo .env https://raw.githubusercontent.com/isachivka/telegram-scanner-bot/main/.env.example
 ```
 
-Edit `.env`:
+### 2. Create the Telegram bot
 
-1. `TELEGRAM_BOT_TOKEN` — create a bot with [@BotFather](https://t.me/BotFather).
-2. `SCANNER_URL` — the scanner's eSCL address. Almost every network MFP made after ~2015 answers at `http://<scanner-ip>/eSCL`. Not sure? Let the container find it:
-   ```bash
-   docker compose run --rm --entrypoint airscan-discover scanner-bot
-   ```
-3. `PRINTER_QUEUE` — optional, the CUPS queue name (`lpstat -p` on the host). Skip it and the print features hide themselves.
+Open [@BotFather](https://t.me/BotFather), send `/newbot`, follow the prompts, and copy the token into `.env`:
 
-Check everything before going live:
+```bash
+TELEGRAM_BOT_TOKEN=7123456789:AAH4x...your-token...
+```
+
+### 3. Point it at the scanner
+
+Almost every network MFP made after ~2015 speaks eSCL (a.k.a. AirScan / "Apple AirPrint scanning") at `http://<scanner-ip>/eSCL`. Put the address in `.env`:
+
+```bash
+SCANNER_URL=http://192.168.1.50/eSCL
+```
+
+Not sure about the IP or the path? Let the container discover it:
+
+```bash
+docker compose run --rm --entrypoint airscan-discover scanner-bot
+```
+
+Typical output — copy the URL of your device:
+
+```
+[devices]
+  "HP LaserJet MFP M140we" = http://192.168.1.50:80/eSCL, eSCL
+```
+
+### 4. (Optional) Point it at the printer
+
+Printing goes through CUPS. If the Docker host already prints to your printer, the queue name is in `lpstat -p`:
+
+```bash
+$ lpstat -p
+printer HP_LaserJet_MFP_M140we is idle.  enabled since Sat 06 Sep 2026 10:00:00
+```
+
+```bash
+PRINTER_QUEUE=HP_LaserJet_MFP_M140we
+```
+
+No CUPS on the host? Either install it (`apt install cups`, add the printer at `http://localhost:631`) or leave `PRINTER_QUEUE` empty — the bot then simply hides the print features.
+
+### 5. Check, then start
 
 ```bash
 docker compose run --rm scanner-bot --check
 ```
 
-It lists the scanners SANE sees, queries the printer, and validates the Telegram token. Then:
+Expected output:
+
+```
+✔ configuration parsed
+✔ scanimage -L found 1 device(s)
+  airscan:e0:Scanner — eSCL HP LaserJet MFP M140we ip=192.168.1.50
+✔ lpstat -p HP_LaserJet_MFP_M140we: printer HP_LaserJet_MFP_M140we is idle.  enabled since ...
+✔ telegram: token is valid, bot is @my_scanner_bot
+  ALLOWED_USER_IDS is empty: every user is rejected and shown their id
+  mcp http: disabled (MCP_HTTP_PORT unset); stdio mode available via `mcp-stdio`
+```
+
+Every `✘` line says what to fix. When it's all `✔`:
 
 ```bash
 docker compose up -d
 ```
 
-Open the bot in Telegram and send `/start`. It replies _Access denied_ together with your user ID — put that ID into `ALLOWED_USER_IDS`, run `docker compose up -d` again, and you're in.
+### 6. Allow yourself
 
-## Telegram usage
+Open your bot in Telegram, send `/start`. Because the allow-list is empty it answers:
+
+```
+Access denied.
+Your Telegram user ID: 123456789
+Add it to ALLOWED_USER_IDS and restart the bot.
+```
+
+Put the ID (comma-separate several) into `.env` and restart:
+
+```bash
+ALLOWED_USER_IDS=123456789
+```
+
+```bash
+docker compose up -d
+```
+
+Send `/start` again — you get the menu. Done.
+
+### Updating
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+## Using it from Telegram
 
 | Command   | What it does                                      |
 | --------- | ------------------------------------------------- |
-| `/start`  | Main menu: **Scan**, **Print**                    |
+| `/start`  | Main menu: **📄 Scan**, **🖨 Print**               |
 | `/cancel` | Abort the current scan or print session           |
 | `/status` | Devices SANE sees, printer state, active sessions |
 
-**Scanning.** _Scan page_ scans one sheet from the glass; press it once per page. _Scan feeder_ (shown when `SCAN_ADF_SOURCE` is set) pulls every sheet through the ADF in one go. The mode and DPI buttons cycle through the values in `SCAN_MODES` / `SCAN_DPI_OPTIONS`. _Finish_ assembles the pages into `scan-YYYYMMDD-HHMMSS.pdf` and sends it back; images are wrapped losslessly, nothing is re-encoded.
+**Scan a multi-page document**
 
-**Printing.** _Print_ then send a PDF (as a document), an image file, or a plain photo. The copies button cycles through `PRINT_COPIES_OPTIONS`. Files above `PRINT_MAX_FILE_MB` (20 MB, the Bot API's download limit) are rejected.
+1. `/start` → **📄 Scan**. The session card shows the current mode / DPI / page count.
+2. Put page 1 on the glass, tap **➕ Scan page**. Wait for _Done, pages scanned: 1_.
+3. Repeat for every page. Change **🎨 Color / Gray** or **🔍 dpi** at any time; the buttons cycle through `SCAN_MODES` and `SCAN_DPI_OPTIONS`.
+4. Tap **✅ Finish** — the bot sends `scan-20260906-101530.pdf`. Page images are wrapped into the PDF losslessly; nothing is re-encoded.
 
-## MCP server (scan and print from an AI agent)
+**Scan a stack with the document feeder** — set `SCAN_ADF_SOURCE` (see below), load the feeder, tap **📚 Scan feeder**. All sheets are pulled through in one go and added to the session; you can still add single pages from the glass afterwards.
 
-The container can serve the [Model Context Protocol](https://modelcontextprotocol.io) over Streamable HTTP so an agent on another machine can use the scanner and printer. Enable it in `.env`:
+**Print** — `/start` → **🖨 Print**, tap **🧮 Copies** to cycle `PRINT_COPIES_OPTIONS`, then send a PDF (as a document), an image file, or just a photo from the camera. Files above `PRINT_MAX_FILE_MB` (20 MB, the Bot API's own limit) are rejected.
+
+Anyone not in `ALLOWED_USER_IDS` is refused and shown their ID, so onboarding a family member is: they press `/start`, you add the ID, restart.
+
+## Using it from an AI agent (MCP)
+
+The container can serve the [Model Context Protocol](https://modelcontextprotocol.io) over HTTP. Claude Code, Codex, Cursor, Claude Desktop — anything that can talk to a remote MCP server — then gets tools to scan and print. Scanned pages come back **as images**, so the agent reads the document it just scanned.
+
+### 1. Enable the endpoint
+
+Generate a token and add both lines to `.env`:
+
+```bash
+$ openssl rand -hex 24
+9f3c1b7a0d4e8c2f6a5b1d9e7c3a2f4b8d6e0c1a3b5d7f9e
+```
 
 ```bash
 MCP_HTTP_PORT=8765
-MCP_AUTH_TOKEN=$(openssl rand -hex 24)   # paste the value, not the command
+MCP_AUTH_TOKEN=9f3c1b7a0d4e8c2f6a5b1d9e7c3a2f4b8d6e0c1a3b5d7f9e
 ```
 
-Restart, then connect a client. Claude Code:
+```bash
+docker compose up -d
+```
+
+The token is mandatory: without it the container refuses to start rather than exposing your scanner and printer to everyone on the network. Every request must carry `Authorization: Bearer <token>`; anything else gets `401`.
+
+Sanity check from any machine on the LAN (`<server-ip>` is the Docker host):
+
+```bash
+$ curl -s http://<server-ip>:8765/healthz
+ok
+$ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://<server-ip>:8765/mcp
+401
+```
+
+### 2. Connect your agent
+
+**Claude Code** (one command, stored in `~/.claude.json`):
 
 ```bash
 claude mcp add --transport http scanner http://<server-ip>:8765/mcp \
-  --header "Authorization: Bearer <MCP_AUTH_TOKEN>"
+  --header "Authorization: Bearer 9f3c1b7a0d4e8c2f6a5b1d9e7c3a2f4b8d6e0c1a3b5d7f9e"
 ```
 
-Codex CLI (`~/.codex/config.toml`):
+Verify with `claude mcp list` (should show `scanner: ... - ✓ Connected`) or `/mcp` inside a session.
+
+**Codex CLI** — add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.scanner]
 url = "http://<server-ip>:8765/mcp"
-http_headers = { Authorization = "Bearer <MCP_AUTH_TOKEN>" }
+http_headers = { Authorization = "Bearer 9f3c1b7a0d4e8c2f6a5b1d9e7c3a2f4b8d6e0c1a3b5d7f9e" }
 ```
 
-Any other client that supports remote HTTP MCP servers with custom headers works the same way. Then just ask: _"scan what's on the scanner and summarise it"_, _"print this PDF, two copies"_, _"print a shopping list: milk, eggs, bread"_.
+**Cursor** — `~/.cursor/mcp.json` (or the project's `.cursor/mcp.json`):
 
-### Tools
+```json
+{
+  "mcpServers": {
+    "scanner": {
+      "url": "http://<server-ip>:8765/mcp",
+      "headers": {
+        "Authorization": "Bearer 9f3c1b7a0d4e8c2f6a5b1d9e7c3a2f4b8d6e0c1a3b5d7f9e"
+      }
+    }
+  }
+}
+```
+
+**Claude Desktop / other clients without header support** — bridge through `mcp-remote`:
+
+```json
+{
+  "mcpServers": {
+    "scanner": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://<server-ip>:8765/mcp",
+        "--header",
+        "Authorization: Bearer 9f3c1b7a0d4e8c2f6a5b1d9e7c3a2f4b8d6e0c1a3b5d7f9e"
+      ]
+    }
+  }
+}
+```
+
+### 3. Talk to it
+
+Things that work out of the box, in plain language:
+
+- _"Scan the letter on the scanner and tell me what it says and when the deadline is."_
+- _"Scan the whole stack in the feeder in greyscale at 200 dpi and save it as `rent-contract`."_
+- _"List my scans and delete everything older than last week."_
+- _"Print this PDF, two copies."_ (the agent reads the file and calls `print_file` with its bytes)
+- _"Print a shopping list: milk, eggs, bread, coffee."_ → `print_text`
+- _"Is the printer online?"_ → `printer_status`
+
+Under the hood the agent sees these tools:
 
 | Tool             | Purpose                                                                                                                                                                                                                                                   |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -101,24 +255,50 @@ Any other client that supports remote HTTP MCP servers with custom headers works
 | `print_file`     | Print a PDF / image / text file by server path (e.g. a scan's `pdf_path`) or as base64 bytes with a filename. _(printer only)_                                                                                                                            |
 | `print_text`     | Print plain text — notes, lists, letters. _(printer only)_                                                                                                                                                                                                |
 
-Stored scans are also exposed as MCP resources (`scan://<name>.pdf`). Scans live in the `scans` volume (`SCAN_OUTPUT_DIR`, default `/data/scans`).
+Stored scans are also exposed as MCP resources (`scan://<name>.pdf`). They live in the `scans` volume (`SCAN_OUTPUT_DIR`, default `/data/scans`), so `docker compose down` doesn't lose them.
+
+### MCP without Telegram
+
+Leave `TELEGRAM_BOT_TOKEN` empty and only the MCP endpoint runs. `--check` and everything else work the same.
 
 ### Local (stdio) mode
 
-If the agent runs on the same machine as the scanner and you'd rather not open a port:
+If the agent runs on the same machine as the scanner and you'd rather not open a port at all:
 
 ```bash
 claude mcp add scanner -- docker run -i --rm --network host --env-file .env \
   ghcr.io/isachivka/telegram-scanner-bot mcp-stdio
 ```
 
-Or without Docker, from a checkout: `npm run build && node dist/index.js mcp-stdio` (needs `scanimage`, `img2pdf`, and `lp` on the PATH).
+Or without Docker, from a checkout: `npm ci && npm run build && node dist/index.js mcp-stdio` (needs `scanimage`, `img2pdf`, and `lp` on the PATH).
 
 ### Security notes
 
-- The HTTP endpoint refuses to start without `MCP_AUTH_TOKEN`; every request must carry `Authorization: Bearer <token>`. Compare is constant-time.
-- It speaks plain HTTP. Keep it on your LAN / VPN (Tailscale, WireGuard) or put a TLS-terminating reverse proxy in front of it; don't expose it to the internet as-is.
+- Bearer token on every request, compared in constant time. No token, no start.
+- Plain HTTP. Keep it on your LAN / VPN (Tailscale, WireGuard) or put a TLS-terminating reverse proxy in front; don't expose it to the internet as-is.
 - `print_file` with a `path` prints any file the container can read. The container only sees its own filesystem and the `scans` volume — don't mount things you wouldn't want printed.
+- Rotate the token by changing `MCP_AUTH_TOKEN` and restarting; clients need the new value.
+
+## Complete `.env` example
+
+An HP LaserJet MFP with a feeder, printing through the host's CUPS, Telegram for the family, MCP for Claude Code:
+
+```bash
+TELEGRAM_BOT_TOKEN=7123456789:AAH4x...
+ALLOWED_USER_IDS=123456789,987654321
+BOT_LANGUAGE=en
+
+SCANNER_URL=http://192.168.1.50/eSCL
+SCAN_MODES=Color,Gray
+SCAN_DPI_OPTIONS=150,300,600
+SCAN_DEFAULT_DPI=300
+SCAN_ADF_SOURCE=ADF
+
+PRINTER_QUEUE=HP_LaserJet_MFP_M140we
+
+MCP_HTTP_PORT=8765
+MCP_AUTH_TOKEN=9f3c1b7a0d4e8c2f6a5b1d9e7c3a2f4b8d6e0c1a3b5d7f9e
+```
 
 ## Configuration reference
 
