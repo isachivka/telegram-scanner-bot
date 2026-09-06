@@ -45,11 +45,34 @@ export function createBot(
   const bot = new Bot<BotContext>(telegram.botToken, opts.botConfig);
 
   bot.use(async (ctx, next) => {
-    log.debug(
-      { from: ctx.from?.id, text: ctx.message?.text, data: ctx.callbackQuery?.data },
-      "update",
-    );
+    const chat = ctx.chat;
+    const fields = {
+      from: ctx.from?.id,
+      chatId: chat?.id,
+      chatType: chat?.type,
+      chatTitle: chat && "title" in chat ? chat.title : undefined,
+      text: ctx.message?.text,
+      data: ctx.callbackQuery?.data,
+    };
+    // Group traffic is logged at info level so the chat id is easy to find
+    // when filling in ALLOWED_CHAT_IDS.
+    if (chat && chat.type !== "private") log.info(fields, "group update");
+    else log.debug(fields, "update");
     await next();
+  });
+  // Before the allow-list: whoever adds the bot to a chat, the id gets logged.
+  bot.on("my_chat_member", async (ctx) => {
+    const { chat, new_chat_member } = ctx.myChatMember;
+    log.info(
+      {
+        chatId: chat.id,
+        chatType: chat.type,
+        chatTitle: "title" in chat ? chat.title : undefined,
+        status: new_chat_member.status,
+        by: ctx.from.id,
+      },
+      `bot membership changed: ${new_chat_member.status}`,
+    );
   });
   bot.use(allowlist(env));
   // One conversation per person per chat, so two family members in the same

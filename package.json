@@ -1,6 +1,6 @@
 {
   "name": "telegram-scanner-bot",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Self-hosted Telegram bot that turns any SANE/eSCL network scanner into a scan-to-PDF service and any CUPS printer into a print-from-chat service",
   "type": "module",

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 — 2026-09-06
+
+- Log the chat id and title of every group update and of bot membership changes at info level, so `docker compose logs` is enough to fill in `ALLOWED_CHAT_IDS`.
+
 ## 1.1.0 — 2026-09-06
 
 - `ALLOWED_CHAT_IDS`: group chats where every member may use the bot. In other groups strangers are ignored silently instead of being told their ID; `/status` in a group shows the chat ID.
