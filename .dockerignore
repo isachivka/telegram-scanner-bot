@@ -2,7 +2,9 @@ node_modules
 dist
 .env
 .git
-.gitignore
-*.log
-README.md
+.github
+test
+docs
+*.md
 .DS_Store
+coverage

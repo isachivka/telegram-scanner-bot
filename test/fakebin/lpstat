@@ -1,0 +1,3 @@
+#!/bin/sh
+[ -n "$FAKE_LOG" ] && printf 'lpstat %s\n' "$*" >> "$FAKE_LOG"
+echo "printer $2 is idle.  enabled since Mon 01 Jan 2024 00:00:00"

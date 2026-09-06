@@ -1,0 +1,32 @@
+#!/bin/sh
+# Fake scanimage for tests. Records its argv to $FAKE_LOG and writes tiny images.
+# Env knobs: FAKE_SCAN_FAIL=1 (exit 1), FAKE_SCAN_SLEEP=<sec>, FAKE_ADF_PAGES=<n>,
+# FAKE_ADF_EXIT7=1 (exit with SANE_STATUS_NO_DOCS after the batch, like real ADFs).
+[ -n "$FAKE_LOG" ] && printf 'scanimage %s\n' "$*" >> "$FAKE_LOG"
+JPEG_B64='/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA='
+write_img() { printf '%s' "$JPEG_B64" | base64 -d > "$1"; }
+[ -n "$FAKE_SCAN_SLEEP" ] && sleep "$FAKE_SCAN_SLEEP"
+if [ "$FAKE_SCAN_FAIL" = "1" ]; then
+  echo "scanimage: sane_start: Device busy" >&2
+  exit 1
+fi
+out=""; batch=""; start=1
+for a in "$@"; do
+  case "$a" in
+    -L) printf "device \`airscan:e0:Fake MFP' is a eSCL Fake MFP ip=192.0.2.10\ndevice \`test:0' is a Noname frontend-tester virtual device\n"; exit 0 ;;
+    --output-file=*) out="${a#--output-file=}" ;;
+    --batch=*) batch="${a#--batch=}" ;;
+    --batch-start=*) start="${a#--batch-start=}" ;;
+  esac
+done
+if [ -n "$batch" ]; then
+  n="${FAKE_ADF_PAGES:-2}"; i=0
+  while [ "$i" -lt "$n" ]; do
+    write_img "$(printf "$batch" $((start + i)))"
+    i=$((i + 1))
+  done
+  [ "$FAKE_ADF_EXIT7" = "1" ] && { echo "scanimage: sane_start: Document feeder out of documents" >&2; exit 7; }
+  exit 0
+fi
+[ -n "$out" ] && write_img "$out"
+exit 0

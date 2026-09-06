@@ -1,15 +1,21 @@
-import pino from "pino";
+import pino, { type Logger } from "pino";
 
-const isDev = process.env.NODE_ENV !== "production";
+export type { Logger };
 
-export const logger = pino({
-  level: process.env.LOG_LEVEL ?? "info",
-  ...(isDev
-    ? {
-        transport: {
-          target: "pino-pretty",
-          options: { colorize: true, translateTime: "SYS:HH:MM:ss" },
-        },
-      }
-    : {}),
-});
+export function createLogger(level: string): Logger {
+  const pretty = process.env.NODE_ENV !== "production" && process.stdout.isTTY;
+  return pino({
+    level,
+    ...(pretty
+      ? {
+          transport: {
+            target: "pino-pretty",
+            options: { colorize: true, translateTime: "SYS:HH:MM:ss" },
+          },
+        }
+      : {}),
+  });
+}
+
+/** Silent logger for tests and `--check`. */
+export const nullLogger: Logger = pino({ level: "silent" });

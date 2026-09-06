@@ -1,0 +1,29 @@
+name: Bug report
+description: Something does not scan, print, or start
+labels: [bug]
+body:
+  - type: input
+    id: scanner
+    attributes:
+      label: Scanner / printer model
+      placeholder: HP LaserJet MFP M140we, Brother DCP-L2550DW…
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: Output of `docker compose run --rm scanner-bot --check`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (`docker compose logs scanner-bot`)
+      render: text

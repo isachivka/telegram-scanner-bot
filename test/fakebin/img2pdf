@@ -1,0 +1,12 @@
+#!/bin/sh
+# Fake img2pdf: `img2pdf a.jpg b.jpg -o out.pdf` → writes a stub PDF listing the inputs.
+[ -n "$FAKE_LOG" ] && printf 'img2pdf %s\n' "$*" >> "$FAKE_LOG"
+out=""; inputs=""; prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$a"; prev=""; continue; fi
+  if [ "$a" = "-o" ]; then prev="-o"; continue; fi
+  [ -f "$a" ] || { echo "img2pdf: error: cannot read $a" >&2; exit 1; }
+  inputs="$inputs $a"
+done
+[ -n "$out" ] || { echo "img2pdf: error: no -o" >&2; exit 1; }
+{ printf '%%PDF-1.4\n%% fake pdf\n'; for f in $inputs; do printf '%% page %s\n' "$f"; done; printf '%%%%EOF\n'; } > "$out"

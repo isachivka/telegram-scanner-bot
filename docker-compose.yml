@@ -1,9 +1,18 @@
 services:
   scanner-bot:
-    build: .
+    image: ghcr.io/isachivka/telegram-scanner-bot:latest
+    # To build from source instead of pulling the image:
+    # build: .
     container_name: scanner-bot
     restart: unless-stopped
     env_file: .env
+    # host networking lets SANE discover the scanner over mDNS and lets the
+    # container reach a CUPS server on localhost; see README "Networking".
     network_mode: host
     volumes:
-      - ./config/airscan.conf:/etc/sane.d/airscan.conf:ro
+      - scans:/data/scans
+      # Optional: bring your own sane-airscan config instead of SCANNER_URL.
+      # - ./airscan.conf:/etc/sane.d/airscan.conf:ro
+
+volumes:
+  scans:

@@ -1,0 +1,7 @@
+#!/bin/sh
+[ -n "$FAKE_LOG" ] && printf 'lp %s\n' "$*" >> "$FAKE_LOG"
+if [ "$FAKE_LP_FAIL" = "1" ]; then echo "lp: The printer or class does not exist." >&2; exit 1; fi
+file=""
+for a in "$@"; do file="$a"; done
+[ -f "$file" ] || { echo "lp: Unable to access \"$file\" - No such file or directory" >&2; exit 1; }
+echo "request id is FakeQueue-42 (1 file(s))"
