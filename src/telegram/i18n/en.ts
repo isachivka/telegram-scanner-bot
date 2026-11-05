@@ -35,6 +35,54 @@ export const en = {
   printFailed: (err: string) => `Print failed: ${err}`,
   printDisabled: "Printing is not configured on this bot.",
 
+  photoDisabled: "Photo scanning to Immich is not configured on this bot.",
+  photoNoKey: "There is no Immich API key for your Telegram account (IMMICH_API_KEYS).",
+  photoIntro: (dpi: number, album?: string) =>
+    `Paper photos → Immich (${dpi} dpi)\n\n` +
+    `Put ONE photo face down on the glass, close the lid and press "Scan". ` +
+    `I will crop the white background, ask roughly when and where it was taken, ` +
+    `and upload it to Immich${album ? ` (album "${album}")` : ""}.`,
+  photoScanning: (dpi: number) => `Scanning the photo at ${dpi} dpi, about 40 seconds…`,
+  photoScanned: "Scanned.",
+  photoPreview: 'Here it is. If it lies sideways, press "Rotate".',
+  photoNotFound:
+    'I could not find a photo on the glass, so this is the whole scan. Move the photo and press "Rescan" if needed.',
+  photoDropped: "Photo discarded.",
+  askDate: (hasPrevious: boolean, previous?: string) =>
+    "When was it taken, roughly?\n" +
+    "For example: 1987, May 1987, summer 87, 12.05.1987, 1980s, late 70s.\n" +
+    'Don\'t know — send "-".' +
+    (hasPrevious
+      ? `\nSame as the previous photo (${previous ?? "unknown"}) — send "=".`
+      : ""),
+  dateNotUnderstood:
+    'I did not get that date. Try: 1987, May 1987, summer 87, 12.05.1987, 1980s — or "-" if unknown.',
+  askPlace: (hasPrevious: boolean, previous?: string) =>
+    'Where was it taken? A city, a place or an address: "Sochi", "Moscow, VDNH".\n' +
+    'Don\'t know — send "-".' +
+    (hasPrevious
+      ? `\nSame as the previous photo (${previous ?? "unknown"}) — send "=".`
+      : ""),
+  placeFound: (name: string) => `📍 Found: ${name}\nIs that right?`,
+  placeNotFound: (query: string) =>
+    `Could not find "${query}" on the map. Write it differently (a city works best), or keep it without coordinates: then the place only goes into the description.`,
+  datePlaceholder: "e.g. summer 1987",
+  placePlaceholder: "e.g. Sochi",
+  uploading: "Uploading to Immich…",
+  uploaded: (link: string, count: number) =>
+    `✅ In Immich: ${link}\nPhotos this session: ${count}.\n\nPut the next one on the glass and press "Scan", or "Finish".`,
+  albumFailed: (err: string) => `(Could not add it to the album: ${err})`,
+  uploadFailed: (err: string) => `Upload to Immich failed: ${err}`,
+  photoFinished: (count: number) => `Done, photos uploaded: ${count}.`,
+  photoDescription: (date?: { label: string; exact: boolean }, place?: string) =>
+    [
+      "Scanned paper photo.",
+      date ? `Date: ${date.exact ? "" : "about "}${date.label}.` : "Date unknown.",
+      place ? `Place: ${place}.` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" "),
+
   status: {
     header: "Status",
     scannerDevice: (d: string) => `Scanner device: ${d}`,
@@ -58,6 +106,16 @@ export const en = {
   btn: {
     startScan: "📄 Scan",
     startPrint: "🖨 Print",
+    startPhoto: "🖼 Photo → Immich",
+    photoScan: "📷 Scan",
+    photoDone: "🏁 Finish",
+    photoRotate: "🔄 Rotate",
+    photoRescan: "🔁 Rescan",
+    photoNext: "✅ Next",
+    photoDrop: "🗑 Discard",
+    placeOk: "✅ Yes",
+    placeRetry: "✏️ Another place",
+    placeNoGeo: "📝 Without coordinates",
     scanPage: "➕ Scan page",
     scanAdf: "📚 Scan feeder",
     finish: "✅ Finish",

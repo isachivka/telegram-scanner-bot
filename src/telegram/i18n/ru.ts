@@ -42,6 +42,54 @@ export const ru: Dictionary = {
   printFailed: (err) => `Ошибка печати: ${err}`,
   printDisabled: "Печать в этом боте не настроена.",
 
+  photoDisabled: "Загрузка фотографий в Immich в этом боте не настроена.",
+  photoNoKey: "Для твоего Telegram-аккаунта не задан ключ Immich (IMMICH_API_KEYS).",
+  photoIntro: (dpi, album) =>
+    `Бумажные фото → Immich (${dpi} dpi)\n\n` +
+    `Положи ОДНУ фотографию на стекло лицом вниз, закрой крышку и нажми «Сканировать». ` +
+    `Я обрежу белый фон, спрошу примерную дату и место и загружу фото в Immich` +
+    `${album ? ` (альбом «${album}»)` : ""}.`,
+  photoScanning: (dpi) => `Сканирую фото в ${dpi} dpi, это около 40 секунд…`,
+  photoScanned: "Отсканировано.",
+  photoPreview: "Вот что получилось. Если фото лежит боком — «Повернуть».",
+  photoNotFound:
+    "Не нашёл фотографию на стекле, поэтому это весь скан. Если нужно — поправь фото и нажми «Пересканировать».",
+  photoDropped: "Фото отброшено.",
+  askDate: (hasPrevious, previous) =>
+    "Когда примерно сделано фото?\n" +
+    "Например: 1987, май 1987, лето 87, 12.05.1987, 80-е, конец 70-х.\n" +
+    "Не знаешь — отправь «-»." +
+    (hasPrevious
+      ? `\nКак у прошлого фото (${previous ?? "неизвестно"}) — отправь «=».`
+      : ""),
+  dateNotUnderstood:
+    "Не понял дату 🤔 Попробуй так: 1987, май 1987, лето 87, 12.05.1987, 80-е — или «-», если не знаешь.",
+  askPlace: (hasPrevious, previous) =>
+    "Где сделано фото? Город, место или адрес: «Сочи», «Москва, ВДНХ».\n" +
+    "Не знаешь — отправь «-»." +
+    (hasPrevious
+      ? `\nКак у прошлого фото (${previous ?? "неизвестно"}) — отправь «=».`
+      : ""),
+  placeFound: (name) => `📍 Нашёл: ${name}\nВерно?`,
+  placeNotFound: (query) =>
+    `Не нашёл «${query}» на карте. Напиши иначе (лучше всего — город) или оставь без координат: тогда место просто запишется в описание фото.`,
+  datePlaceholder: "например: лето 1987",
+  placePlaceholder: "например: Сочи",
+  uploading: "Загружаю в Immich…",
+  uploaded: (link, count) =>
+    `✅ Фото в Immich: ${link}\nЗа эту сессию: ${count}.\n\nКлади следующую и жми «Сканировать» — или «Закончить».`,
+  albumFailed: (err) => `(Не получилось добавить в альбом: ${err})`,
+  uploadFailed: (err) => `Не удалось загрузить в Immich: ${err}`,
+  photoFinished: (count) => `Готово, загружено фото: ${count}.`,
+  photoDescription: (date, place) =>
+    [
+      "Скан бумажной фотографии.",
+      date ? `Дата: ${date.exact ? "" : "примерно "}${date.label}.` : "Дата неизвестна.",
+      place ? `Место: ${place}.` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" "),
+
   status: {
     header: "Состояние",
     scannerDevice: (d) => `Устройство сканера: ${d}`,
@@ -65,6 +113,16 @@ export const ru: Dictionary = {
   btn: {
     startScan: "📄 Сканировать",
     startPrint: "🖨 Печать",
+    startPhoto: "🖼 Фото в Immich",
+    photoScan: "📷 Сканировать",
+    photoDone: "🏁 Закончить",
+    photoRotate: "🔄 Повернуть",
+    photoRescan: "🔁 Пересканировать",
+    photoNext: "✅ Дальше",
+    photoDrop: "🗑 Отбросить",
+    placeOk: "✅ Да",
+    placeRetry: "✏️ Другое место",
+    placeNoGeo: "📝 Без координат",
     scanPage: "➕ Страница",
     scanAdf: "📚 Из податчика",
     finish: "✅ Завершить",

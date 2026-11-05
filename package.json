@@ -1,8 +1,8 @@
 {
   "name": "telegram-scanner-bot",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
-  "description": "Self-hosted Telegram bot that turns any SANE/eSCL network scanner into a scan-to-PDF service and any CUPS printer into a print-from-chat service",
+  "description": "Self-hosted Telegram bot that turns any SANE/eSCL network scanner into a scan-to-PDF and paper-photos-to-Immich service and any CUPS printer into a print-from-chat service",
   "type": "module",
   "main": "dist/index.js",
   "engines": {
@@ -26,6 +26,7 @@
     "async-mutex": "^0.5.0",
     "grammy": "^1.46.0",
     "pino": "^10.3.1",
+    "sharp": "^0.34.5",
     "zod": "^4.5.4"
   },
   "devDependencies": {

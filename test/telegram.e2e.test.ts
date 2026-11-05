@@ -56,7 +56,9 @@ async function parseRequest(
     if (filename) {
       files.set(name, filename.replace(/^"|"$/g, ""));
     } else {
-      fields.set(name, part.split("\r\n\r\n")[1]?.replace(/\r\n$/, "") ?? "");
+      const value = part.split("\r\n\r\n")[1]?.replace(/\r\n$/, "") ?? "";
+      // The body was read as latin1 to keep file bytes intact; text is UTF-8.
+      fields.set(name, Buffer.from(value, "latin1").toString("utf8"));
     }
   }
   const payload: Record<string, unknown> = {};
@@ -76,7 +78,10 @@ async function parseRequest(
 }
 
 /** Bot wired to an in-memory Telegram API that records every call. */
-function harness(sb: Sandbox, opts: { fetchImpl?: typeof fetch } = {}) {
+function harness(
+  sb: Sandbox,
+  opts: { fetchImpl?: typeof fetch; http?: typeof fetch } = {},
+) {
   const calls: ApiCall[] = [];
   let nextMessageId = 100;
   let nextUpdateId = 1;
@@ -88,6 +93,7 @@ function harness(sb: Sandbox, opts: { fetchImpl?: typeof fetch } = {}) {
     switch (method) {
       case "sendMessage":
       case "sendDocument":
+      case "sendPhoto":
         result = {
           message_id: nextMessageId++,
           date: 0,
@@ -96,6 +102,7 @@ function harness(sb: Sandbox, opts: { fetchImpl?: typeof fetch } = {}) {
         };
         break;
       case "editMessageText":
+      case "editMessageMedia":
         result = {
           message_id: payload.message_id,
           date: 0,
@@ -124,6 +131,7 @@ function harness(sb: Sandbox, opts: { fetchImpl?: typeof fetch } = {}) {
   const bot: Bot<BotContext> = createBot(sb.services, {
     botConfig: { botInfo: ME, client: { fetch: fakeTelegram } },
     download: { apiRoot: "http://telegram.test", fetchImpl: opts.fetchImpl },
+    http: opts.http,
   });
 
   type Override = { from?: typeof USER; chat?: object };
@@ -511,6 +519,197 @@ describe("telegram bot", () => {
       );
       await h.text("/status");
       expect(h.last("sendMessage")?.payload.text).not.toContain("chat");
+    });
+  });
+
+  describe("photos to Immich", () => {
+    const PHOTO_ENV = {
+      IMMICH_URL: "http://immich.test",
+      IMMICH_PUBLIC_URL: "https://photos.example",
+      IMMICH_API_KEYS: "1001:key-igor",
+      IMMICH_ALBUM: "Scans",
+      IMMICH_ALBUM_SHARE_WITH: "u-dasha",
+      PHOTO_SCAN_VIA: "sane",
+      GEOCODER_URL: "https://geo.test",
+    };
+
+    function photoHttp() {
+      const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+      const http: typeof fetch = async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+        calls.push({ method, url, body });
+        const json = (v: unknown) =>
+          new Response(JSON.stringify(v), {
+            headers: { "content-type": "application/json" },
+          });
+        if (url.startsWith("https://geo.test/search")) {
+          return url.includes("Atlantis")
+            ? json([])
+            : json([{ lat: "43.5", lon: "39.7", display_name: "Sochi, Russia" }]);
+        }
+        if (method === "POST" && url.endsWith("/api/assets")) {
+          return json({ id: `asset-${calls.length}`, status: "created" });
+        }
+        if (method === "GET" && url.includes("/api/albums")) return json([]);
+        if (method === "POST" && url.endsWith("/api/albums"))
+          return json({ id: "album-1" });
+        return json({});
+      };
+      return { http, calls };
+    }
+
+    it("is offered in the main menu only when configured", async () => {
+      let h = harness(sb);
+      await h.text("/start");
+      expect(h.buttons(h.last("sendMessage"))).not.toContain("🖼 Photo → Immich");
+      await sb.cleanup();
+      sb = await createSandbox(PHOTO_ENV);
+      h = harness(sb);
+      await h.text("/start");
+      expect(h.buttons(h.last("sendMessage"))).toEqual([
+        "📄 Scan",
+        "🖨 Print",
+        "🖼 Photo → Immich",
+      ]);
+    });
+
+    it("scans, rotates, asks date and place, uploads, and reuses answers", async () => {
+      await sb.cleanup();
+      sb = await createSandbox(PHOTO_ENV);
+      const { http, calls } = photoHttp();
+      const h = harness(sb, { http });
+      await h.text("/start");
+      await h.press("main:photo");
+      expect(h.last("sendMessage")?.payload.text).toMatch(
+        /^Paper photos → Immich \(600 dpi\)/,
+      );
+      expect(h.buttons(h.last("sendMessage"))).toEqual(["📷 Scan", "🏁 Finish"]);
+
+      await h.press("photo:scan");
+      const scan = (await sb.calls()).find((c) => c.startsWith("scanimage"));
+      expect(scan).toMatch(
+        /--mode=Color --resolution=600 --format=jpeg --output-file=.*scan\.jpg$/,
+      );
+      const preview = h.last("sendPhoto");
+      expect(h.buttons(preview)).toEqual([
+        "🔄 Rotate",
+        "🔁 Rescan",
+        "✅ Next",
+        "🗑 Discard",
+      ]);
+
+      await h.press("photo:rotate");
+      expect(h.last("editMessageMedia")).toBeDefined();
+      await h.press("photo:next");
+      const askDate = h.last("sendMessage");
+      expect(askDate?.payload.text).toMatch(/^When was it taken, roughly\?/);
+      expect(askDate?.payload.reply_markup).toMatchObject({ force_reply: true });
+
+      await h.text("someday");
+      expect(h.last("sendMessage")?.payload.text).toMatch(/^I did not get that date/);
+      await h.text("summer 87");
+      expect(h.last("sendMessage")?.payload.text).toMatch(/^Where was it taken\?/);
+
+      await h.text("Atlantis");
+      expect(h.last("sendMessage")?.payload.text).toMatch(/^Could not find "Atlantis"/);
+      expect(h.buttons(h.last("sendMessage"))).toEqual([
+        "✏️ Another place",
+        "📝 Without coordinates",
+      ]);
+      await h.press("photo:place-retry");
+      await h.text("Sochi");
+      expect(h.last("sendMessage")?.payload.text).toBe(
+        "📍 Found: Sochi, Russia\nIs that right?",
+      );
+      await h.press("photo:place-ok");
+
+      const done = h.last("editMessageText")?.payload.text as string;
+      expect(done).toMatch(/^✅ In Immich: https:\/\/photos\.example\/photos\/asset-\d+/);
+      expect(done).toContain("Photos this session: 1.");
+      const update = calls.find(
+        (c) => c.method === "PUT" && /\/api\/assets\//.test(c.url),
+      );
+      expect(update?.body).toEqual({
+        dateTimeOriginal: "1987-07-01T12:00:00.000Z",
+        latitude: 43.5,
+        longitude: 39.7,
+        description: "Scanned paper photo. Date: about summer 87. Place: Sochi.",
+      });
+      expect(
+        calls.find((c) => c.method === "POST" && c.url.endsWith("/api/albums"))?.body,
+      ).toMatchObject({
+        albumName: "Scans",
+        albumUsers: [{ userId: "u-dasha", role: "editor" }],
+      });
+
+      // Second photo: "=" reuses both answers.
+      await h.press("photo:scan");
+      await h.press("photo:next");
+      expect(h.last("sendMessage")?.payload.text).toContain(
+        'Same as the previous photo (summer 87) — send "=".',
+      );
+      await h.text("=");
+      expect(h.last("sendMessage")?.payload.text).toContain(
+        "Same as the previous photo (Sochi, Russia)",
+      );
+      await h.text("=");
+      expect(h.last("editMessageText")?.payload.text).toContain(
+        "Photos this session: 2.",
+      );
+      const updates = calls.filter(
+        (c) => c.method === "PUT" && /\/api\/assets\//.test(c.url),
+      );
+      expect(updates[1]?.body).toEqual(updates[0]?.body);
+
+      await h.press("photo:done");
+      expect(h.last("sendMessage")?.payload.text).toBe("Done, photos uploaded: 2.");
+      expect(sb.services.sessions.size).toBe(0);
+    });
+
+    it("uploads with unknown date and place, keeping the scan date", async () => {
+      await sb.cleanup();
+      sb = await createSandbox(PHOTO_ENV);
+      const { http, calls } = photoHttp();
+      const h = harness(sb, { http });
+      await h.press("main:photo");
+      await h.press("photo:scan");
+      await h.press("photo:next");
+      await h.text("-");
+      await h.text("не знаю");
+      const update = calls.find(
+        (c) => c.method === "PUT" && /\/api\/assets\//.test(c.url),
+      );
+      expect(update?.body).toEqual({ description: "Scanned paper photo. Date unknown." });
+      expect(h.last("editMessageText")?.payload.text).toMatch(/^✅ In Immich/);
+    });
+
+    it("refuses people without an Immich key", async () => {
+      await sb.cleanup();
+      sb = await createSandbox({ ...PHOTO_ENV, IMMICH_API_KEYS: "2002:other" });
+      const h = harness(sb, { http: photoHttp().http });
+      await h.press("main:photo");
+      expect(h.last("sendMessage")?.payload.text).toMatch(/no Immich API key/);
+    });
+
+    it("mentions the person and makes the reply prompt selective in groups", async () => {
+      await sb.cleanup();
+      sb = await createSandbox(PHOTO_ENV);
+      const h = harness(sb, { http: photoHttp().http });
+      const GROUP = { id: -100777, type: "supergroup" as const, title: "Home" };
+      await h.press("main:photo", { chat: GROUP });
+      await h.press("photo:scan", { chat: GROUP });
+      await h.press("photo:next", { chat: GROUP });
+      const ask = h.last("sendMessage");
+      expect(ask?.payload.text).toMatch(/^Igor, When was it taken/);
+      expect(ask?.payload.reply_markup).toMatchObject({
+        force_reply: true,
+        selective: true,
+      });
+      expect(ask?.payload.entities).toEqual([
+        { type: "text_mention", offset: 0, length: 4, user: USER },
+      ]);
     });
   });
 

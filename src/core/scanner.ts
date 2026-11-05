@@ -4,6 +4,7 @@ import { Mutex } from "async-mutex";
 import type { Config, ScanFormat } from "../config.js";
 import type { Logger } from "../util/logger.js";
 import { exec, ExecError } from "../util/exec.js";
+import { esclScanPlaten } from "./escl.js";
 
 export interface ScanOptions {
   mode: string;
@@ -100,6 +101,31 @@ export class Scanner {
         .sort((a, b) => a.n - b.n)
         .map(({ f }) => path.join(dir, f));
       return { pages: produced };
+    });
+  }
+
+  /**
+   * Scan the whole flatbed in colour as JPEG at `dpi`, for paper photos. Goes
+   * straight to the scanner over eSCL when `esclUrl` is given (SANE would
+   * clamp the resolution to the advertised list), through scanimage otherwise.
+   */
+  async scanPhoto(outPath: string, dpi: number, esclUrl?: string): Promise<void> {
+    await this.lock.runExclusive(async () => {
+      if (esclUrl) {
+        this.log.debug({ esclUrl, dpi }, "escl photo scan");
+        await esclScanPlaten(esclUrl, outPath, { dpi, timeoutMs: this.cfg.timeoutMs });
+        return;
+      }
+      const args = [
+        ...(this.cfg.device ? [`--device-name=${this.cfg.device}`] : []),
+        `--mode=Color`,
+        `--resolution=${dpi}`,
+        `--format=jpeg`,
+        ...(this.cfg.source ? [`--source=${this.cfg.source}`] : []),
+        `--output-file=${outPath}`,
+      ];
+      this.log.debug({ args }, "scanimage photo");
+      await exec("scanimage", args, { timeoutMs: this.cfg.timeoutMs });
     });
   }
 

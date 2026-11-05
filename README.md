@@ -4,6 +4,7 @@ Turn the network scanner and printer you already own into a service you can driv
 
 - **Scan → PDF from Telegram.** Tap _Scan page_ for each sheet (or _Scan feeder_ to empty the ADF), pick colour/greyscale and DPI, tap _Finish_ and the bot sends back one PDF.
 - **Print from Telegram.** Send a PDF, an image, or a photo and it comes out of the printer.
+- **Paper photos → Immich.** Put an old photo on the glass: the bot scans it at the scanner's full optical resolution, crops it out of the white lid, lets you rotate it, asks roughly _when_ ("summer 87", "late 70s") and _where_ ("Sochi") it was taken, and uploads it to [Immich](https://immich.app) with that date, map location and a description.
 - **MCP server.** Expose `scan`, `print_file`, `print_text` and friends to an agent. The scanned pages come back as images, so the agent can _read_ the document it just scanned ("scan the letter on the glass and tell me the due date").
 - **Any scanner SANE can drive** — every eSCL/AirScan network MFP (HP, Brother, Canon, Epson, Xerox…) works with just a URL; USB devices work with a `--device` mapping. **Any printer CUPS knows.**
 - Single container, no database, allow-list of Telegram users, bearer token on the MCP endpoint.
@@ -127,11 +128,11 @@ docker compose pull && docker compose up -d
 
 ## Using it from Telegram
 
-| Command   | What it does                                      |
-| --------- | ------------------------------------------------- |
-| `/start`  | Main menu: **📄 Scan**, **🖨 Print**               |
-| `/cancel` | Abort the current scan or print session           |
-| `/status` | Devices SANE sees, printer state, active sessions |
+| Command   | What it does                                              |
+| --------- | --------------------------------------------------------- |
+| `/start`  | Main menu: **📄 Scan**, **🖨 Print**, **🖼 Photo → Immich** |
+| `/cancel` | Abort the current scan or print session                   |
+| `/status` | Devices SANE sees, printer state, active sessions         |
 
 **Scan a multi-page document**
 
@@ -147,6 +148,27 @@ docker compose pull && docker compose up -d
 Anyone not in `ALLOWED_USER_IDS` is refused and shown their ID, so onboarding a family member is: they press `/start`, you add the ID, restart.
 
 **Group chats.** Add the bot to a family group and it sends the PDFs there. Allowed users work in any group. To let _everyone_ in a group use the bot, send `/status` in it (as an allowed user) — it shows the chat ID — and put that into `ALLOWED_CHAT_IDS`. In groups the bot never answers strangers, so it can't be used to enumerate IDs or spam. Each person gets their own scan session, so two people can scan in the same group without mixing pages. Note: Telegram's [privacy mode](https://core.telegram.org/bots/features#privacy-mode) only lets the bot see commands and button presses in groups, which is all it needs; sending a file to print in a group requires disabling privacy mode via @BotFather or replying to a bot message.
+
+### Paper photos → Immich
+
+Set `IMMICH_URL` and an API key (see [Configuration](#paper-photos--immich-1)) and the main menu gets **🖼 Photo → Immich**. One photo at a time:
+
+1. Put **one** photo face down on the glass, close the lid, tap **📷 Scan**. The whole platen is scanned in colour at `PHOTO_DPI` (600 by default; ~35 s on an HP Laser MFP 135w).
+2. The bot finds the photo on the white lid, crops it and shows a preview. **🔄 Rotate** turns it by 90°, **🔁 Rescan** scans again, **🗑 Discard** drops it, **✅ Next** goes on. A photo pushed into a corner of the glass is fine; an empty glass gives the whole scan back.
+3. _When was it taken, roughly?_ Anything like `12.05.1987`, `05.1987`, `May 1987`, `май 1987`, `summer 87`, `лето 87`, `1987`, `80s`, `80-е`, `late 70s`, `конец 70-х`. `-` = unknown, `=` = same as the previous photo.
+4. _Where?_ A city, a place or an address. It is looked up on OpenStreetMap ([Nominatim](https://nominatim.org)); confirm the match, try another wording, or keep the place as text only. `-` and `=` work here too.
+5. The photo is uploaded with:
+   - **date** — the parsed date at noon UTC (a year becomes 1 January, a season its middle month, a decade its middle year; "late 70s" → 1978), written both to the file's EXIF `DateTimeOriginal` and to Immich. Unknown date = the scan date;
+   - **location** — the geocoded coordinates (Immich then fills in city and country itself);
+   - **description** — e.g. `Scanned paper photo. Date: about summer 87. Place: Sochi.`, so the precision you gave is not lost;
+   - **album** — added to `IMMICH_ALBUM`, created on first use and shared with `IMMICH_ALBUM_SHARE_WITH`.
+6. Put the next photo on the glass and tap **📷 Scan** again, or **🏁 Finish**.
+
+**Why direct eSCL.** sane-airscan offers only the resolutions a scanner advertises, and many MFPs advertise 300 dpi while scanning the platen at their optical 600 dpi when asked directly. With `SCANNER_URL` set, photo scans therefore talk eSCL to the scanner themselves (`PHOTO_SCAN_VIA=auto`); `PHOTO_SCAN_VIA=sane` sends them through `scanimage` like documents.
+
+**Whose library.** Each person can upload into their own Immich account: `IMMICH_API_KEYS=<telegram id>:<api key>,…`; everybody else uses `IMMICH_API_KEY`. The key needs `asset.upload`, `asset.read`, `asset.update`, `album.create`, `album.read`, `albumAsset.create`, `albumUser.create`.
+
+**In groups** the questions are asked as replies to the person who is scanning (a `force_reply` prompt with a mention), so the bot receives the answers even in privacy mode.
 
 ## Using it from an AI agent (MCP)
 
@@ -377,6 +399,20 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `MCP_HTTP_PATH`        | `/mcp`             |                                                                                                                                        |
 | `SCAN_OUTPUT_DIR`      | `/data/scans`      | Where MCP scans are stored.                                                                                                            |
 | `LOG_LEVEL`            | `info`             | pino level.                                                                                                                            |
+
+### Paper photos → Immich
+
+| Variable                  | Default                               | Description                                                                                          |
+| ------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `IMMICH_URL`              | —                                     | Immich server the bot talks to (`http://immich:2283`). Enables the photo mode.                       |
+| `IMMICH_PUBLIC_URL`       | `IMMICH_URL`                          | Base URL for the links the bot sends back (what people open on their phones).                        |
+| `IMMICH_API_KEY`          | —                                     | Key used for Telegram users without one of their own.                                                |
+| `IMMICH_API_KEYS`         | —                                     | `<telegram user id>:<api key>,…` — upload into each person's own library.                            |
+| `IMMICH_ALBUM`            | `Scanned photos`                      | Album every scan goes into; created on first use. Empty = no album.                                  |
+| `IMMICH_ALBUM_SHARE_WITH` | —                                     | Immich user ids added as editors when the album is created.                                          |
+| `PHOTO_DPI`               | `600`                                 | Resolution of photo scans.                                                                           |
+| `PHOTO_SCAN_VIA`          | `auto`                                | `escl` (straight to `SCANNER_URL`), `sane` (`scanimage`), `auto` = `escl` when `SCANNER_URL` is set. |
+| `GEOCODER_URL`            | `https://nominatim.openstreetmap.org` | Nominatim-compatible geocoder for places. Empty = places are kept as text only.                      |
 
 ## Networking
 

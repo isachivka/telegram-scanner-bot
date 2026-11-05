@@ -6,6 +6,9 @@ export type Language = (typeof LANGUAGES)[number];
 export const SCAN_FORMATS = ["jpeg", "png"] as const;
 export type ScanFormat = (typeof SCAN_FORMATS)[number];
 
+export const PHOTO_SCAN_VIA = ["auto", "escl", "sane"] as const;
+export type PhotoScanVia = (typeof PHOTO_SCAN_VIA)[number];
+
 const csv = (raw: string): string[] =>
   raw
     .split(",")
@@ -106,6 +109,16 @@ const schema = z.object({
     .default(7 * 24 * 3600),
   UPLOAD_MAX_MB: z.coerce.number().positive().default(50),
 
+  IMMICH_URL: optionalString,
+  IMMICH_PUBLIC_URL: optionalString,
+  IMMICH_API_KEY: optionalString,
+  IMMICH_API_KEYS: z.string().default(""),
+  IMMICH_ALBUM: z.string().default("Scanned photos"),
+  IMMICH_ALBUM_SHARE_WITH: z.string().default("").transform(csv),
+  PHOTO_DPI: z.coerce.number().int().positive().default(600),
+  PHOTO_SCAN_VIA: z.enum(PHOTO_SCAN_VIA).default("auto"),
+  GEOCODER_URL: z.string().default("https://nominatim.openstreetmap.org"),
+
   LOG_LEVEL: z.string().default("info"),
 });
 
@@ -155,6 +168,24 @@ export interface Config {
     queue: string;
     copiesOptions: number[];
     maxFileBytes: number;
+  };
+  /** Scan paper photos into Immich; enabled by IMMICH_URL + an API key. */
+  photos?: {
+    immichUrl: string;
+    /** Base URL for links shown to people (defaults to immichUrl). */
+    publicUrl: string;
+    /** Used for Telegram users without a key of their own. */
+    defaultApiKey?: string;
+    /** Telegram user id → Immich API key, so photos land in that person's library. */
+    apiKeys: Map<number, string>;
+    album?: string;
+    /** Immich user ids added as editors when the album is created. */
+    albumShareWith: string[];
+    dpi: number;
+    /** eSCL URL to scan through directly (SANE's airscan only offers the advertised resolutions). */
+    esclUrl?: string;
+    /** Forward geocoder (Nominatim API); undefined = places are kept as text only. */
+    geocoderUrl?: string;
   };
   logLevel: string;
 }
@@ -213,6 +244,31 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new ConfigError("PUBLIC_URL must start with http:// or https://");
   }
 
+  const apiKeys = new Map<number, string>();
+  for (const entry of csv(p.IMMICH_API_KEYS)) {
+    const m = entry.match(/^(-?\d+):(.+)$/);
+    if (!m) {
+      throw new ConfigError(
+        `IMMICH_API_KEYS entries must look like <telegram user id>:<api key>, got "${entry.replace(/:.*/, ":***")}"`,
+      );
+    }
+    apiKeys.set(Number(m[1]), m[2]!.trim());
+  }
+  if (p.IMMICH_URL && !/^https?:\/\//.test(p.IMMICH_URL)) {
+    throw new ConfigError("IMMICH_URL must start with http:// or https://");
+  }
+  if (p.IMMICH_URL && !p.IMMICH_API_KEY && apiKeys.size === 0) {
+    throw new ConfigError(
+      "IMMICH_URL is set but neither IMMICH_API_KEY nor IMMICH_API_KEYS is",
+    );
+  }
+  const viaEscl =
+    p.PHOTO_SCAN_VIA === "escl" || (p.PHOTO_SCAN_VIA === "auto" && !!p.SCANNER_URL);
+  if (p.PHOTO_SCAN_VIA === "escl" && !p.SCANNER_URL) {
+    throw new ConfigError("PHOTO_SCAN_VIA=escl needs SCANNER_URL");
+  }
+  const trimSlash = (u: string) => u.replace(/\/+$/, "");
+
   return {
     telegram: p.TELEGRAM_BOT_TOKEN
       ? {
@@ -258,6 +314,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           maxFileBytes: Math.round(p.PRINT_MAX_FILE_MB * 1024 * 1024),
         }
       : undefined,
+    photos: p.IMMICH_URL
+      ? {
+          immichUrl: trimSlash(p.IMMICH_URL),
+          publicUrl: trimSlash(p.IMMICH_PUBLIC_URL ?? p.IMMICH_URL),
+          defaultApiKey: p.IMMICH_API_KEY,
+          apiKeys,
+          album: p.IMMICH_ALBUM.trim() || undefined,
+          albumShareWith: p.IMMICH_ALBUM_SHARE_WITH,
+          dpi: p.PHOTO_DPI,
+          esclUrl: viaEscl ? trimSlash(p.SCANNER_URL!) : undefined,
+          geocoderUrl: p.GEOCODER_URL.trim()
+            ? trimSlash(p.GEOCODER_URL.trim())
+            : undefined,
+        }
+      : undefined,
     logLevel: p.LOG_LEVEL,
   };
 }
@@ -278,6 +349,13 @@ export function describeConfig(c: Config): Record<string, unknown> {
     },
     scanner: c.scanner,
     printer: c.printer,
+    photos: c.photos
+      ? {
+          ...c.photos,
+          defaultApiKey: c.photos.defaultApiKey ? "***" : undefined,
+          apiKeys: [...c.photos.apiKeys.keys()].map((id) => `${id}:***`),
+        }
+      : undefined,
     logLevel: c.logLevel,
   };
 }

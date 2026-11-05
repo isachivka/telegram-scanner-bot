@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 — 2026-11-05
+
+- **Paper photos → Immich.** New main-menu mode: scan one photo at a time at the scanner's optical resolution (`PHOTO_DPI`, 600 by default, talking eSCL directly so SANE's advertised-resolution list does not cap it), crop it out of the white lid, rotate, answer roughly when ("summer 87", "late 70s", "-") and where (geocoded through Nominatim) it was taken, and upload it to Immich with that date, location, a description and an album shared with the family.
+- Per-person Immich libraries via `IMMICH_API_KEYS`.
+- Questions in groups use `force_reply` with a mention, so answers reach the bot in privacy mode.
+
 ## 1.1.1 — 2026-09-06
 
 - Log the chat id and title of every group update and of bot membership changes at info level, so `docker compose logs` is enough to fill in `ALLOWED_CHAT_IDS`.
