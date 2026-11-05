@@ -22,6 +22,7 @@ export const CB = {
   placeOk: "photo:place-ok",
   placeRetry: "photo:place-retry",
   placeNoGeo: "photo:place-nogeo",
+  uploadRetry: "photo:upload-retry",
   noop: "noop",
 } as const;
 
@@ -88,4 +89,10 @@ export function printSessionKb(t: Dictionary, copies: number): InlineKeyboard {
     .text(t.btn.copies(copies), CB.cycleCopies)
     .row()
     .text(t.btn.cancel, CB.printCancel);
+}
+
+export function uploadFailedKb(t: Dictionary): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(t.btn.uploadRetry, CB.uploadRetry)
+    .text(t.btn.photoDrop, CB.photoDrop);
 }

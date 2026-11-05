@@ -685,6 +685,52 @@ describe("telegram bot", () => {
       expect(h.last("editMessageText")?.payload.text).toMatch(/^✅ In Immich/);
     });
 
+    it("explains a failed scan in plain words and offers to scan again", async () => {
+      await sb.cleanup();
+      sb = await createSandbox(PHOTO_ENV);
+      const h = harness(sb, { http: photoHttp().http });
+      await h.press("main:photo");
+      process.env.FAKE_SCAN_FAIL = "1";
+      await h.press("photo:scan");
+      const failed = h.last("editMessageText");
+      expect(failed?.payload.text).toMatch(/^The scanner could not scan this time/);
+      expect(failed?.payload.text).not.toMatch(/scanimage|HTTP/);
+      expect(h.buttons(failed)).toEqual(["📷 Scan", "🏁 Finish"]);
+      delete process.env.FAKE_SCAN_FAIL;
+      await h.press("photo:scan");
+      expect(h.last("sendPhoto")).toBeDefined();
+    });
+
+    it("keeps the answers when an upload fails and retries on request", async () => {
+      await sb.cleanup();
+      sb = await createSandbox(PHOTO_ENV);
+      const { http: base, calls } = photoHttp();
+      let failUploads = 1;
+      const http: typeof fetch = async (input, init) => {
+        if ((init?.method ?? "GET") === "POST" && String(input).endsWith("/api/assets")) {
+          if (failUploads-- > 0) return new Response("boom", { status: 500 });
+        }
+        return base(input, init);
+      };
+      const h = harness(sb, { http });
+      await h.press("main:photo");
+      await h.press("photo:scan");
+      await h.press("photo:next");
+      await h.text("1987");
+      await h.text("-");
+      const failed = h.last("editMessageText");
+      expect(failed?.payload.text).toMatch(/^Could not upload to Immich/);
+      expect(h.buttons(failed)).toEqual(["🔁 Retry upload", "🗑 Discard"]);
+      await h.press("photo:upload-retry");
+      expect(h.last("editMessageText")?.payload.text).toMatch(/^✅ In Immich/);
+      const update = calls.find(
+        (c) => c.method === "PUT" && /\/api\/assets\//.test(c.url),
+      );
+      expect(update?.body).toMatchObject({
+        dateTimeOriginal: "1987-01-01T12:00:00.000Z",
+      });
+    });
+
     it("refuses people without an Immich key", async () => {
       await sb.cleanup();
       sb = await createSandbox({ ...PHOTO_ENV, IMMICH_API_KEYS: "2002:other" });

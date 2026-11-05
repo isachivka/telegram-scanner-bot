@@ -2,7 +2,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { esclScanPlaten, type Region } from "../core/escl.js";
 import type { Logger } from "../util/logger.js";
-import { detectPhoto, type Box } from "./crop.js";
+import { cropPhoto, locatePhoto, type Box } from "./crop.js";
 
 export interface PhotoScan {
   /** Image to crop the photo from. */
@@ -39,10 +39,18 @@ export async function scanPhotoEscl(
     timeoutMs: opts.timeoutMs,
     fetchImpl: opts.fetchImpl,
   });
-  const box = await detectPhoto(preview);
-  if (!box || dpi <= PREVIEW_DPI) {
-    return { file: preview, box, dpi: PREVIEW_DPI, reduced: false };
-  }
+  const { box, background } = await locatePhoto(preview);
+  const previewResult = async (reduced: boolean): Promise<PhotoScan> => {
+    if (!box) return { file: preview, dpi: PREVIEW_DPI, reduced };
+    const c = await cropPhoto(
+      preview,
+      path.join(dir, "platen-straight.jpg"),
+      background,
+      PREVIEW_DPI,
+    );
+    return { file: c.file, box: c.box, dpi: PREVIEW_DPI, reduced };
+  };
+  if (!box || dpi <= PREVIEW_DPI) return previewResult(false);
 
   // At 300 dpi a preview pixel is exactly one eSCL unit (1/300 inch).
   const unitsPerPx = 300 / PREVIEW_DPI;
@@ -63,24 +71,38 @@ export async function scanPhotoEscl(
     });
   } catch (err) {
     opts.log.warn({ err, dpi }, "high-resolution photo pass failed; using the preview");
-    return { file: preview, box, dpi: PREVIEW_DPI, reduced: true };
+    return previewResult(true);
   }
 
-  // Map the photo box into the region scan; the scanner may round the region.
+  // Where the photo should be in the region scan, by arithmetic…
   const meta = await sharp(hires).metadata();
   const W = meta.width ?? 0;
   const H = meta.height ?? 0;
   const k = dpi / 300;
-  const left = Math.max(0, Math.round((box.left * unitsPerPx - region.left) * k));
-  const top = Math.max(0, Math.round((box.top * unitsPerPx - region.top) * k));
-  const width = Math.min(W - left, Math.round(box.width * unitsPerPx * k));
-  const height = Math.min(H - top, Math.round(box.height * unitsPerPx * k));
-  if (width < 16 || height < 16) {
-    opts.log.warn(
-      { W, H, region },
-      "high-resolution pass came back too small; using the preview",
-    );
-    return { file: preview, box, dpi: PREVIEW_DPI, reduced: true };
+  const mLeft = Math.max(0, Math.round((box.left * unitsPerPx - region.left) * k));
+  const mTop = Math.max(0, Math.round((box.top * unitsPerPx - region.top) * k));
+  const mapped: Box = {
+    left: mLeft,
+    top: mTop,
+    width: Math.min(W - mLeft, Math.round(box.width * unitsPerPx * k)),
+    height: Math.min(H - mTop, Math.round(box.height * unitsPerPx * k)),
+  };
+  if (mapped.width < 16 || mapped.height < 16) {
+    opts.log.warn({ W, H, region }, "high-resolution pass came back too small");
+    return previewResult(true);
   }
-  return { file: hires, box: { left, top, width, height }, dpi, reduced: false };
+  // …but the scanner does not place a 600 dpi region exactly where the 300 dpi
+  // pass saw it (an HP 135w shifts it by ~2 mm), so look again in the region
+  // scan, against the lid colour measured on the whole platen.
+  const c = await cropPhoto(hires, path.join(dir, "photo-straight.jpg"), background, dpi);
+  const area = (b: Box) => b.width * b.height;
+  const plausible =
+    c.found !== undefined &&
+    area(c.found) > 0.75 * area(mapped) &&
+    area(c.found) < 1.25 * area(mapped);
+  if (!plausible) {
+    opts.log.warn({ found: c.found, mapped }, "photo not re-found in the region scan");
+    return { file: hires, box: mapped, dpi, reduced: false };
+  }
+  return { file: c.file, box: c.box, dpi, reduced: false };
 }

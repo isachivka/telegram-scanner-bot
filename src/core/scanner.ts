@@ -4,7 +4,7 @@ import { Mutex } from "async-mutex";
 import type { Config, ScanFormat } from "../config.js";
 import type { Logger } from "../util/logger.js";
 import { exec, ExecError } from "../util/exec.js";
-import { detectPhoto } from "../photo/crop.js";
+import { cropPhoto, locatePhoto } from "../photo/crop.js";
 import { scanPhotoEscl, type PhotoScan } from "../photo/scan.js";
 
 export interface ScanOptions {
@@ -131,7 +131,14 @@ export class Scanner {
       ];
       this.log.debug({ args }, "scanimage photo");
       await exec("scanimage", args, { timeoutMs: this.cfg.timeoutMs });
-      return { file, box: await detectPhoto(file), dpi, reduced: false };
+      const { background } = await locatePhoto(file);
+      const c = await cropPhoto(
+        file,
+        path.join(dir, "platen-straight.jpg"),
+        background,
+        dpi,
+      );
+      return { file: c.file, box: c.box, dpi, reduced: false };
     });
   }
 

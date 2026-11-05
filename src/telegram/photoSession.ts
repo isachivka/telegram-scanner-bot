@@ -8,6 +8,7 @@ import {
   photoIdleKb,
   photoPreviewKb,
   placeKb,
+  uploadFailedKb,
   workingKb,
 } from "./keyboards.js";
 import { scanFileName } from "../core/services.js";
@@ -155,11 +156,13 @@ export function photoSession(env: BotEnv) {
           reduced = scanned.reduced;
           rotation = 0;
         } catch (err) {
-          log.error({ err }, "photo scan failed");
+          const detail = errorMessage(err);
+          // Wrapped so a conversation replay does not log the same failure again.
+          await conv.external(() => log.error({ err: detail }, "photo scan failed"));
           await ctx.api.editMessageText(
             status.chat.id,
             status.message_id,
-            t.scanFailed(errorMessage(err)),
+            t.photoScanFailed,
             { reply_markup: photoIdleKb(t) },
           );
           continue idle;
@@ -183,19 +186,32 @@ export function photoSession(env: BotEnv) {
           ]);
           const data = c.callbackQuery!.data;
           if (data === CB.photoRotate) {
-            await c.answerCallbackQuery();
-            rotation = ((rotation + 90) % 360) as Rotation;
-            const r = rotation;
+            const r = ((rotation + 90) % 360) as Rotation;
             const src = rawPath;
-            await conv.external(() =>
-              renderPreview(src, previewPath, { box, rotation: r }),
-            );
-            await ctx.api.editMessageMedia(
-              preview.chat.id,
-              preview.message_id,
-              InputMediaBuilder.photo(new InputFile(previewPath), { caption }),
-              { reply_markup: photoPreviewKb(t) },
-            );
+            // A failure here must not end the conversation: report it, keep going.
+            const ok = await conv.external(async () => {
+              try {
+                await renderPreview(src, previewPath, { box, rotation: r });
+                return true;
+              } catch (err) {
+                log.error({ err }, "rotating the preview failed");
+                return false;
+              }
+            });
+            if (!ok) {
+              await c.answerCallbackQuery({ text: t.rotateFailed, show_alert: true });
+              continue;
+            }
+            await c.answerCallbackQuery();
+            rotation = r;
+            await ctx.api
+              .editMessageMedia(
+                preview.chat.id,
+                preview.message_id,
+                InputMediaBuilder.photo(new InputFile(previewPath), { caption }),
+                { reply_markup: photoPreviewKb(t) },
+              )
+              .catch(() => {});
             continue;
           }
           await ctx.api
@@ -289,64 +305,75 @@ export function photoSession(env: BotEnv) {
         await ask(t.askPlace(false), t.placePlaceholder);
       }
 
-      // ── upload ─────────────────────────────────────────────────────────
-      const status = await ctx.reply(t.uploading, { reply_markup: workingKb(t) });
+      // ── upload (retried on request, so the answers are not lost) ────────
       const description = t.photoDescription(
         date ? { label: date.label, exact: date.precision === "day" } : undefined,
         place ? place.query : undefined,
       );
       const r = rotation;
       const src = rawPath;
-      try {
+      while (true) {
+        const status = await ctx.reply(t.uploading, { reply_markup: workingKb(t) });
         const result = await conv.external(async () => {
-          const takenAt = date ? `${date.date}T12:00:00.000Z` : new Date().toISOString();
-          await renderPhoto(src, finalPath, {
-            box,
-            rotation: r,
-            exifDate: date ? `${date.date.replace(/-/g, ":")} 12:00:00` : undefined,
-          });
-          const immich = new ImmichClient(photos.immichUrl, apiKey, http);
-          const id = await immich.upload(finalPath, scanFileName("jpg"), takenAt);
-          await immich.update(id, {
-            dateTimeOriginal: date ? takenAt : undefined,
-            latitude: place?.latitude,
-            longitude: place?.longitude,
-            description,
-          });
-          let albumError: string | null = null;
-          if (photos.album) {
-            try {
-              const albumId = await immich.ensureAlbum(
-                photos.album,
-                photos.albumShareWith,
-              );
-              await immich.addToAlbum(albumId, [id]);
-            } catch (err) {
-              log.warn({ err }, "adding to album failed");
-              albumError = errorMessage(err);
+          try {
+            const takenAt = date
+              ? `${date.date}T12:00:00.000Z`
+              : new Date().toISOString();
+            await renderPhoto(src, finalPath, {
+              box,
+              rotation: r,
+              exifDate: date ? `${date.date.replace(/-/g, ":")} 12:00:00` : undefined,
+            });
+            const immich = new ImmichClient(photos.immichUrl, apiKey, http);
+            const id = await immich.upload(finalPath, scanFileName("jpg"), takenAt);
+            await immich.update(id, {
+              dateTimeOriginal: date ? takenAt : undefined,
+              latitude: place?.latitude,
+              longitude: place?.longitude,
+              description,
+            });
+            let albumFailed = false;
+            if (photos.album) {
+              try {
+                const albumId = await immich.ensureAlbum(
+                  photos.album,
+                  photos.albumShareWith,
+                );
+                await immich.addToAlbum(albumId, [id]);
+              } catch (err) {
+                log.warn({ err }, "adding to album failed");
+                albumFailed = true;
+              }
             }
+            return { ok: true as const, id, albumFailed };
+          } catch (err) {
+            log.error({ err }, "immich upload failed");
+            return { ok: false as const };
           }
-          return { id, albumError };
         });
-        uploaded += 1;
-        prevDate = date;
-        prevPlace = place;
-        const link = `${photos.publicUrl}/photos/${result.id}`;
-        await ctx.api.editMessageText(
-          status.chat.id,
-          status.message_id,
-          t.uploaded(link, uploaded) +
-            (result.albumError ? `\n${t.albumFailed(result.albumError)}` : ""),
-          { reply_markup: photoIdleKb(t), link_preview_options: { is_disabled: true } },
-        );
-      } catch (err) {
-        log.error({ err }, "immich upload failed");
-        await ctx.api.editMessageText(
-          status.chat.id,
-          status.message_id,
-          t.uploadFailed(errorMessage(err)),
-          { reply_markup: photoIdleKb(t) },
-        );
+        if (result.ok) {
+          uploaded += 1;
+          prevDate = date;
+          prevPlace = place;
+          const link = `${photos.publicUrl}/photos/${result.id}`;
+          await ctx.api.editMessageText(
+            status.chat.id,
+            status.message_id,
+            t.uploaded(link, uploaded) + (result.albumFailed ? `\n${t.albumFailed}` : ""),
+            { reply_markup: photoIdleKb(t), link_preview_options: { is_disabled: true } },
+          );
+          break;
+        }
+        await ctx.api.editMessageText(status.chat.id, status.message_id, t.uploadFailed, {
+          reply_markup: uploadFailedKb(t),
+        });
+        const c = await waitButton([CB.uploadRetry, CB.photoDrop]);
+        await c.answerCallbackQuery();
+        await c.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+        if (c.callbackQuery!.data === CB.photoDrop) {
+          await ctx.reply(t.photoDropped, { reply_markup: photoIdleKb(t) });
+          break;
+        }
       }
     }
   };
