@@ -8,6 +8,8 @@ import { detectPhoto, renderPhoto } from "../src/photo/crop.js";
 import { esclScanPlaten, parseCapabilities } from "../src/core/escl.js";
 import { ImmichClient } from "../src/photo/immich.js";
 import { geocode } from "../src/photo/geocode.js";
+import { scanPhotoEscl } from "../src/photo/scan.js";
+import { nullLogger } from "../src/util/logger.js";
 import { loadConfig } from "../src/config.js";
 import { baseEnv } from "./helpers.js";
 
@@ -287,6 +289,113 @@ describe("eSCL photo scan", () => {
       width: 2550,
       height: 3507,
     });
+  });
+});
+
+describe("two-pass photo scan", () => {
+  /** Stub scanner: 300 dpi platen with a photo at (600,900) 1200×1800; any region at 600 dpi. */
+  async function stubScanner(failHires: boolean) {
+    const platen = await sharp({
+      create: {
+        width: 2550,
+        height: 3507,
+        channels: 3,
+        background: { r: 252, g: 252, b: 250 },
+      },
+    })
+      .composite([
+        {
+          input: {
+            create: {
+              width: 1200,
+              height: 1800,
+              channels: 3,
+              background: { r: 120, g: 90, b: 60 },
+            },
+          },
+          left: 600,
+          top: 900,
+        },
+      ])
+      .jpeg()
+      .toBuffer();
+    const jobs: string[] = [];
+    let current = "";
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/ScanJobs") && init?.method === "POST") {
+        current = String(init.body);
+        jobs.push(current);
+        return new Response(null, {
+          status: 201,
+          headers: { location: `/eSCL/ScanJobs/${jobs.length}` },
+        });
+      }
+      const m = url.match(/ScanJobs\/(\d+)\/NextDocument$/);
+      if (m) {
+        const xml = jobs[Number(m[1]) - 1]!;
+        if (seenDoc.has(m[1]!)) return new Response(null, { status: 404 });
+        seenDoc.add(m[1]!);
+        const dpi = Number(xml.match(/XResolution>(\d+)/)![1]);
+        if (dpi === 300) return new Response(platen);
+        if (failHires) return new Response(null, { status: 410 });
+        const w = Number(xml.match(/<pwg:Width>(\d+)/)![1]);
+        const h = Number(xml.match(/<pwg:Height>(\d+)/)![1]);
+        const img = await sharp({
+          create: {
+            width: w * 2,
+            height: h * 2,
+            channels: 3,
+            background: { r: 120, g: 90, b: 60 },
+          },
+        })
+          .jpeg()
+          .toBuffer();
+        return new Response(img);
+      }
+      return new Response(null, { status: 404 });
+    };
+    const seenDoc = new Set<string>();
+    return { fetchImpl, jobs };
+  }
+
+  it("finds the photo at 300 dpi and rescans only its region at 600", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "twopass-"));
+    const { fetchImpl, jobs } = await stubScanner(false);
+    const r = await scanPhotoEscl("http://192.0.2.10/eSCL", dir, 600, {
+      timeoutMs: 20_000,
+      log: nullLogger,
+      fetchImpl,
+    });
+    expect(jobs).toHaveLength(2);
+    expect(jobs[0]).toContain("<scan:XResolution>300</scan:XResolution>");
+    expect(jobs[1]).toContain("<scan:XResolution>600</scan:XResolution>");
+    const region = (tag: string) =>
+      Number(jobs[1]!.match(new RegExp(`<pwg:${tag}>(\\d+)`))![1]);
+    expect(Math.abs(region("XOffset") - (600 - 24))).toBeLessThanOrEqual(3);
+    expect(Math.abs(region("YOffset") - (900 - 24))).toBeLessThanOrEqual(3);
+    expect(Math.abs(region("Width") - (1200 + 48))).toBeLessThanOrEqual(6);
+    expect(r).toMatchObject({ dpi: 600, reduced: false });
+    expect(r.file).toMatch(/photo-hires\.jpg$/);
+    expect(Math.abs(r.box!.left - 48)).toBeLessThanOrEqual(6);
+    expect(Math.abs(r.box!.width - 2400)).toBeLessThanOrEqual(12);
+    expect(Math.abs(r.box!.height - 3600)).toBeLessThanOrEqual(12);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("falls back to the 300 dpi crop when the scanner cancels the 600 dpi pass", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "twopass-"));
+    const { fetchImpl, jobs } = await stubScanner(true);
+    const r = await scanPhotoEscl("http://192.0.2.10/eSCL", dir, 600, {
+      timeoutMs: 20_000,
+      log: nullLogger,
+      fetchImpl,
+    });
+    expect(jobs).toHaveLength(3); // preview + two 600 dpi attempts
+    expect(r).toMatchObject({ dpi: 300, reduced: true });
+    expect(r.file).toMatch(/platen\.jpg$/);
+    expect(Math.abs(r.box!.left - 600)).toBeLessThanOrEqual(4);
+    await rm(dir, { recursive: true, force: true });
   });
 });
 

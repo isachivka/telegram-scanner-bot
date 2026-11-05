@@ -153,7 +153,7 @@ Anyone not in `ALLOWED_USER_IDS` is refused and shown their ID, so onboarding a 
 
 Set `IMMICH_URL` and an API key (see [Configuration](#paper-photos--immich-1)) and the main menu gets **🖼 Photo → Immich**. One photo at a time:
 
-1. Put **one** photo face down on the glass, close the lid, tap **📷 Scan**. The whole platen is scanned in colour at `PHOTO_DPI` (600 by default; ~35 s on an HP Laser MFP 135w).
+1. Put **one** photo face down on the glass, close the lid, tap **📷 Scan**. The glass is scanned at 300 dpi to find the photo, then the photo alone in colour at `PHOTO_DPI` (600 by default; ~35 s in total on an HP Laser MFP 135w).
 2. The bot finds the photo on the white lid, crops it and shows a preview. **🔄 Rotate** turns it by 90°, **🔁 Rescan** scans again, **🗑 Discard** drops it, **✅ Next** goes on. A photo pushed into a corner of the glass is fine; an empty glass gives the whole scan back.
 3. _When was it taken, roughly?_ Anything like `12.05.1987`, `05.1987`, `May 1987`, `май 1987`, `summer 87`, `лето 87`, `1987`, `80s`, `80-е`, `late 70s`, `конец 70-х`. `-` = unknown, `=` = same as the previous photo.
 4. _Where?_ A city, a place or an address. It is looked up on OpenStreetMap ([Nominatim](https://nominatim.org)); confirm the match, try another wording, or keep the place as text only. `-` and `=` work here too.
@@ -164,7 +164,7 @@ Set `IMMICH_URL` and an API key (see [Configuration](#paper-photos--immich-1)) a
    - **album** — added to `IMMICH_ALBUM`, created on first use and shared with `IMMICH_ALBUM_SHARE_WITH`.
 6. Put the next photo on the glass and tap **📷 Scan** again, or **🏁 Finish**.
 
-**Why direct eSCL.** sane-airscan offers only the resolutions a scanner advertises, and many MFPs advertise 300 dpi while scanning the platen at their optical 600 dpi when asked directly. With `SCANNER_URL` set, photo scans therefore talk eSCL to the scanner themselves (`PHOTO_SCAN_VIA=auto`); `PHOTO_SCAN_VIA=sane` sends them through `scanimage` like documents.
+**Why direct eSCL, and why two passes.** sane-airscan offers only the resolutions a scanner advertises, and many MFPs advertise 300 dpi while scanning at their optical 600 dpi when asked directly. With `SCANNER_URL` set, photo scans therefore talk eSCL to the scanner themselves (`PHOTO_SCAN_VIA=auto`): the whole platen at 300 dpi to locate the photo, then just the photo's region at `PHOTO_DPI`. Scanning the whole platen at 600 dpi is not an option on at least the HP Laser MFP 135w: it cancels the job (410 Gone) once the image is dense from the first lines, e.g. a photo pushed into the corner. If the second pass fails anyway, the 300 dpi crop is used and the preview says so. `PHOTO_SCAN_VIA=sane` sends a single pass through `scanimage` like documents.
 
 **Whose library.** Each person can upload into their own Immich account: `IMMICH_API_KEYS=<telegram id>:<api key>,…`; everybody else uses `IMMICH_API_KEY`. The key needs `asset.upload`, `asset.read`, `asset.update`, `album.create`, `album.read`, `albumAsset.create`, `albumUser.create`.
 

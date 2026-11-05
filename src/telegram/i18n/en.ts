@@ -42,11 +42,13 @@ export const en = {
     `Put ONE photo face down on the glass, close the lid and press "Scan". ` +
     `I will crop the white background, ask roughly when and where it was taken, ` +
     `and upload it to Immich${album ? ` (album "${album}")` : ""}.`,
-  photoScanning: (dpi: number) => `Scanning the photo at ${dpi} dpi, about 40 seconds…`,
+  photoScanning: (dpi: number) => `Scanning the photo at ${dpi} dpi, about 30 seconds…`,
   photoScanned: "Scanned.",
   photoPreview: 'Here it is. If it lies sideways, press "Rotate".',
   photoNotFound:
     'I could not find a photo on the glass, so this is the whole scan. Move the photo and press "Rescan" if needed.',
+  photoReduced:
+    "⚠️ The scanner could not do the high resolution this time, so this is 300 dpi. Rescan to try again.",
   photoDropped: "Photo discarded.",
   askDate: (hasPrevious: boolean, previous?: string) =>
     "When was it taken, roughly?\n" +
