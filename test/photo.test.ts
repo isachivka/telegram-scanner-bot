@@ -229,7 +229,55 @@ describe("eSCL photo scan", () => {
     expect(job.body).toContain("<pwg:Width>2550</pwg:Width>");
     expect(job.body).toContain("<pwg:Height>3507</pwg:Height>");
     expect(job.body).toContain("<pwg:Version>2.63</pwg:Version>");
-    expect(calls.filter((c) => c.url.endsWith("NextDocument"))).toHaveLength(2);
+    // 503 while warming up, the page, then the one that closes the job.
+    expect(calls.filter((c) => c.url.endsWith("NextDocument"))).toHaveLength(3);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("waits for Idle and retries a job the scanner cancelled (410)", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "escl-test-"));
+    const states = ["Processing", "Idle", "Idle"];
+    let jobs = 0;
+    const seen: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      seen.push(`${init?.method ?? "GET"} ${url.replace("http://192.0.2.10/eSCL", "")}`);
+      if (url.endsWith("/ScannerStatus")) {
+        return new Response(`<pwg:State>${states.shift() ?? "Idle"}</pwg:State>`);
+      }
+      if (url.endsWith("/ScanJobs")) {
+        jobs++;
+        return new Response(null, {
+          status: 201,
+          headers: { location: `/eSCL/ScanJobs/${jobs}` },
+        });
+      }
+      if (url.endsWith("/ScanJobs/1/NextDocument"))
+        return new Response(null, { status: 410 });
+      if (url.endsWith("/ScanJobs/2/NextDocument")) {
+        return seen.filter((s) => s.endsWith("/ScanJobs/2/NextDocument")).length === 1
+          ? new Response(Buffer.from("JPEG2"))
+          : new Response(null, { status: 404 });
+      }
+      return new Response(null, { status: 404 });
+    };
+    const out = path.join(dir, "scan.jpg");
+    await esclScanPlaten("http://192.0.2.10/eSCL", out, {
+      dpi: 600,
+      timeoutMs: 20_000,
+      fetchImpl,
+    });
+    expect(await readFile(out, "utf8")).toBe("JPEG2");
+    expect(seen.filter((s) => s !== "GET /ScannerCapabilities")).toEqual([
+      "GET /ScannerStatus",
+      "GET /ScannerStatus",
+      "POST /ScanJobs",
+      "GET /ScanJobs/1/NextDocument",
+      "GET /ScannerStatus",
+      "POST /ScanJobs",
+      "GET /ScanJobs/2/NextDocument",
+      "GET /ScanJobs/2/NextDocument",
+    ]);
     await rm(dir, { recursive: true, force: true });
   });
 
