@@ -1,9 +1,9 @@
 #!/bin/sh
-# Fake scanimage for tests. Records its argv to $FAKE_LOG and writes tiny images.
+# Fake scanimage for tests. Records its argv to $FAKE_LOG and writes tiny (valid) images.
 # Env knobs: FAKE_SCAN_FAIL=1 (exit 1), FAKE_SCAN_SLEEP=<sec>, FAKE_ADF_PAGES=<n>,
 # FAKE_ADF_EXIT7=1 (exit with SANE_STATUS_NO_DOCS after the batch, like real ADFs).
 [ -n "$FAKE_LOG" ] && printf 'scanimage %s\n' "$*" >> "$FAKE_LOG"
-JPEG_B64='/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA='
+JPEG_B64='/9j/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAwAEADASIAAhEBAxEB/8QAFwABAQEBAAAAAAAAAAAAAAAAAAcGBf/EACYQAAEDAQcEAwAAAAAAAAAAAAABAgUEBhESFlSj0QMTMVE2grL/xAAXAQADAQAAAAAAAAAAAAAAAAAAAgME/8QAHREAAwACAgMAAAAAAAAAAAAAAAECAxESEyExUf/aAAwDAQACEQMRAD8ApYBh7Rz8rRTlRTUtVg6TMOFvbat17UXyqe1FqlK2xpl09I3AJpmqb1u0zgZqm9btM4J90j9NFLBNM1Tet2mcFLHi1XoSoc+wABxQTS13yar+n4aUsw9o4CVrZyoqaWlx9J+HC7uNS+5qJ4VfaEsybnwUxNJ+TJg7OVZvRbrORlWb0W6zkzcK+GjlP04xZCaZVm9Fus5KWXwpreyOVp60AAXIgAAAAAAAAAAAAB//2Q=='
 write_img() { printf '%s' "$JPEG_B64" | base64 -d > "$1"; }
 [ -n "$FAKE_SCAN_SLEEP" ] && sleep "$FAKE_SCAN_SLEEP"
 if [ "$FAKE_SCAN_FAIL" = "1" ]; then

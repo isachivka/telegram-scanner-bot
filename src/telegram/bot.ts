@@ -13,14 +13,17 @@ import { allowlist } from "./allowlist.js";
 import { CB, mainMenuKb } from "./keyboards.js";
 import { scanSession } from "./scanSession.js";
 import { printSession } from "./printSession.js";
+import { photoSession } from "./photoSession.js";
 import { statusReport } from "./status.js";
 
 export const SCAN_CONVERSATION = "scan";
 export const PRINT_CONVERSATION = "print";
+export const PHOTO_CONVERSATION = "photo";
 
 export interface CreateBotOptions {
   botConfig?: BotConfig<BotContext>;
   download?: BotEnv["download"];
+  http?: BotEnv["http"];
 }
 
 export function createBot(
@@ -37,8 +40,10 @@ export function createBot(
     kb: {
       printEnabled: services.printer !== undefined,
       adfEnabled: config.scanner.adfSource !== undefined,
+      photoEnabled: config.photos !== undefined,
     },
     download: opts.download,
+    http: opts.http,
   };
   const { t, kb } = env;
 
@@ -106,6 +111,9 @@ export function createBot(
   if (services.printer) {
     bot.use(createConversation(printSession(env), PRINT_CONVERSATION));
   }
+  if (config.photos) {
+    bot.use(createConversation(photoSession(env), PHOTO_CONVERSATION));
+  }
 
   bot.command("start", showMainMenu);
 
@@ -120,6 +128,14 @@ export function createBot(
     }
     await ctx.answerCallbackQuery();
     await ctx.conversation.enter(PRINT_CONVERSATION);
+  });
+  bot.callbackQuery(CB.startPhoto, async (ctx) => {
+    if (!config.photos) {
+      await ctx.answerCallbackQuery({ text: t.photoDisabled, show_alert: true });
+      return;
+    }
+    await ctx.answerCallbackQuery();
+    await ctx.conversation.enter(PHOTO_CONVERSATION);
   });
   bot.callbackQuery(CB.noop, (ctx) => ctx.answerCallbackQuery());
   // Stale buttons from a finished conversation: acknowledge and re-show the menu.

@@ -11,6 +11,8 @@ export interface BotEnv {
   kb: KeyboardOptions;
   /** Telegram file download overrides (tests point these at a stub). */
   download?: { apiRoot?: string; fetchImpl?: typeof fetch };
+  /** fetch for Immich and the geocoder (tests point it at a stub). */
+  http?: typeof fetch;
 }
 
 export type BotContext = ConversationFlavor<Context>;
