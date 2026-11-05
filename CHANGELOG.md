@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2 — 2026-11-05
+
+- Photo scans over eSCL take two passes: the whole platen at 300 dpi to find the photo, then only the photo's region at `PHOTO_DPI`. The HP Laser MFP 135w cancels a full-platen 600 dpi job (410 Gone, `JobCanceledByTimeOut`) as soon as the picture is dense from the top — a photo in the corner of the glass — but scans a photo-sized region at 600 dpi fine. It is also faster: ~34 s instead of ~40 s.
+- If the high-resolution pass still fails, the 300 dpi crop is used and the preview says so.
+- The detector works on a 1200 px thumbnail (was 800) for a tighter crop.
+
 ## 1.2.1 — 2026-11-05
 
 - eSCL photo scans close their job (the trailing `NextDocument` → 404). Left open, an HP Laser MFP 135w stays "Processing" for ~90 s until it times the job out, and cancels any job posted meanwhile with 410 Gone — so a second photo right after the first failed.

@@ -10,7 +10,7 @@ export interface Box {
 export type Rotation = 0 | 90 | 180 | 270;
 
 /** Long side of the thumbnail the detector works on. */
-const DETECT_SIZE = 800;
+const DETECT_SIZE = 1200;
 /** A pixel belongs to the photo when a channel differs from the lid colour by more. */
 const DIFF_THRESHOLD = 22;
 /** Scanner edges often carry a shadow; ignore this share of each side. */

@@ -4,7 +4,8 @@ import { Mutex } from "async-mutex";
 import type { Config, ScanFormat } from "../config.js";
 import type { Logger } from "../util/logger.js";
 import { exec, ExecError } from "../util/exec.js";
-import { esclScanPlaten } from "./escl.js";
+import { detectPhoto } from "../photo/crop.js";
+import { scanPhotoEscl, type PhotoScan } from "../photo/scan.js";
 
 export interface ScanOptions {
   mode: string;
@@ -105,27 +106,32 @@ export class Scanner {
   }
 
   /**
-   * Scan the whole flatbed in colour as JPEG at `dpi`, for paper photos. Goes
-   * straight to the scanner over eSCL when `esclUrl` is given (SANE would
-   * clamp the resolution to the advertised list), through scanimage otherwise.
+   * Scan a paper photo lying on the flatbed into `dir` and locate it. Over
+   * eSCL (`esclUrl`) in two passes: the platen at 300 dpi to find the photo,
+   * then just the photo at `dpi` (SANE would clamp the resolution to the
+   * advertised list). Without eSCL, one scanimage pass at `dpi`.
    */
-  async scanPhoto(outPath: string, dpi: number, esclUrl?: string): Promise<void> {
-    await this.lock.runExclusive(async () => {
+  async scanPhoto(dir: string, dpi: number, esclUrl?: string): Promise<PhotoScan> {
+    return this.lock.runExclusive(async () => {
       if (esclUrl) {
         this.log.debug({ esclUrl, dpi }, "escl photo scan");
-        await esclScanPlaten(esclUrl, outPath, { dpi, timeoutMs: this.cfg.timeoutMs });
-        return;
+        return scanPhotoEscl(esclUrl, dir, dpi, {
+          timeoutMs: this.cfg.timeoutMs,
+          log: this.log,
+        });
       }
+      const file = path.join(dir, "platen.jpg");
       const args = [
         ...(this.cfg.device ? [`--device-name=${this.cfg.device}`] : []),
         `--mode=Color`,
         `--resolution=${dpi}`,
         `--format=jpeg`,
         ...(this.cfg.source ? [`--source=${this.cfg.source}`] : []),
-        `--output-file=${outPath}`,
+        `--output-file=${file}`,
       ];
       this.log.debug({ args }, "scanimage photo");
       await exec("scanimage", args, { timeoutMs: this.cfg.timeoutMs });
+      return { file, box: await detectPhoto(file), dpi, reduced: false };
     });
   }
 

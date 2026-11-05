@@ -590,7 +590,7 @@ describe("telegram bot", () => {
       await h.press("photo:scan");
       const scan = (await sb.calls()).find((c) => c.startsWith("scanimage"));
       expect(scan).toMatch(
-        /--mode=Color --resolution=600 --format=jpeg --output-file=.*scan\.jpg$/,
+        /--mode=Color --resolution=600 --format=jpeg --output-file=.*platen\.jpg$/,
       );
       const preview = h.last("sendPhoto");
       expect(h.buttons(preview)).toEqual([

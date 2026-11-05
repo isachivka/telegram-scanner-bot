@@ -12,13 +12,7 @@ import {
 } from "./keyboards.js";
 import { scanFileName } from "../core/services.js";
 import { errorMessage } from "../util/exec.js";
-import {
-  detectPhoto,
-  renderPhoto,
-  renderPreview,
-  type Box,
-  type Rotation,
-} from "../photo/crop.js";
+import { renderPhoto, renderPreview, type Box, type Rotation } from "../photo/crop.js";
 import {
   isSameAnswer,
   isUnknownAnswer,
@@ -57,7 +51,8 @@ export function photoSession(env: BotEnv) {
     const inGroup = ctx.chat?.type !== "private";
 
     const session = await conv.external(() => sessions.create(`photo-${user.id}`));
-    const rawPath = path.join(session.dir, "scan.jpg");
+    // Set by each scan: the image the photo is cropped from.
+    let rawPath = path.join(session.dir, "platen.jpg");
     const previewPath = path.join(session.dir, "preview.jpg");
     const finalPath = path.join(session.dir, "photo.jpg");
 
@@ -148,14 +143,16 @@ export function photoSession(env: BotEnv) {
           .editMessageReplyMarkup({ reply_markup: undefined })
           .catch(() => {});
         await removeTriggerButtons;
+        let reduced = false;
         try {
-          const found = await conv.external(async () => {
-            await scanner.scanPhoto(rawPath, photos.dpi, photos.esclUrl);
-            const b = await detectPhoto(rawPath);
-            await renderPreview(rawPath, previewPath, { box: b, rotation: 0 });
-            return b ?? null;
+          const scanned = await conv.external(async () => {
+            const r = await scanner.scanPhoto(session.dir, photos.dpi, photos.esclUrl);
+            await renderPreview(r.file, previewPath, { box: r.box, rotation: 0 });
+            return { file: r.file, box: r.box ?? null, reduced: r.reduced };
           });
-          box = found ?? undefined;
+          rawPath = scanned.file;
+          box = scanned.box ?? undefined;
+          reduced = scanned.reduced;
           rotation = 0;
         } catch (err) {
           log.error({ err }, "photo scan failed");
@@ -169,7 +166,9 @@ export function photoSession(env: BotEnv) {
         }
         await ctx.api.editMessageText(status.chat.id, status.message_id, t.photoScanned);
 
-        const caption = box ? t.photoPreview : t.photoNotFound;
+        const caption =
+          (box ? t.photoPreview : t.photoNotFound) +
+          (reduced ? `\n\n${t.photoReduced}` : "");
         const preview = await ctx.replyWithPhoto(new InputFile(previewPath), {
           caption,
           reply_markup: photoPreviewKb(t),
@@ -187,8 +186,9 @@ export function photoSession(env: BotEnv) {
             await c.answerCallbackQuery();
             rotation = ((rotation + 90) % 360) as Rotation;
             const r = rotation;
+            const src = rawPath;
             await conv.external(() =>
-              renderPreview(rawPath, previewPath, { box, rotation: r }),
+              renderPreview(src, previewPath, { box, rotation: r }),
             );
             await ctx.api.editMessageMedia(
               preview.chat.id,
@@ -296,10 +296,11 @@ export function photoSession(env: BotEnv) {
         place ? place.query : undefined,
       );
       const r = rotation;
+      const src = rawPath;
       try {
         const result = await conv.external(async () => {
           const takenAt = date ? `${date.date}T12:00:00.000Z` : new Date().toISOString();
-          await renderPhoto(rawPath, finalPath, {
+          await renderPhoto(src, finalPath, {
             box,
             rotation: r,
             exifDate: date ? `${date.date.replace(/-/g, ":")} 12:00:00` : undefined,

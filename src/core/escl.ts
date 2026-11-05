@@ -5,14 +5,27 @@ import { writeFile } from "node:fs/promises";
  *
  * Photo scans go straight to the scanner instead of through SANE: sane-airscan
  * only offers the resolutions the scanner advertises, and many MFPs advertise
- * 300 dpi while scanning the platen at their full optical resolution (600 dpi
- * on an HP Laser MFP 135w) when asked directly.
+ * 300 dpi while scanning at their full optical resolution (600 dpi on an HP
+ * Laser MFP 135w) when asked directly — for a region the size of a photo; the
+ * whole platen at 600 dpi fails as soon as the picture is dense.
  */
 
 export interface EsclScanOptions {
   dpi: number;
   timeoutMs: number;
+  /** Part of the platen to scan, in 1/300 inch; the whole platen when omitted. */
+  region?: Region;
+  /** Jobs to try when the scanner cancels one (410); default 3. */
+  attempts?: number;
   fetchImpl?: typeof fetch;
+}
+
+/** In 1/300 inch (eSCL ThreeHundredthsOfInches). */
+export interface Region {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 export interface PlatenSize {
@@ -40,17 +53,22 @@ export function parseCapabilities(xml: string): PlatenSize {
   };
 }
 
-export function scanSettingsXml(platen: PlatenSize, dpi: number): string {
+export function scanSettingsXml(
+  platen: PlatenSize,
+  dpi: number,
+  region?: Region,
+): string {
+  const r = clampRegion(platen, region);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">
   <pwg:Version>${platen.version}</pwg:Version>
   <scan:Intent>Photo</scan:Intent>
   <pwg:ScanRegions>
     <pwg:ScanRegion>
-      <pwg:Height>${platen.height}</pwg:Height>
-      <pwg:Width>${platen.width}</pwg:Width>
-      <pwg:XOffset>0</pwg:XOffset>
-      <pwg:YOffset>0</pwg:YOffset>
+      <pwg:Height>${r.height}</pwg:Height>
+      <pwg:Width>${r.width}</pwg:Width>
+      <pwg:XOffset>${r.left}</pwg:XOffset>
+      <pwg:YOffset>${r.top}</pwg:YOffset>
       <pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>
     </pwg:ScanRegion>
   </pwg:ScanRegions>
@@ -64,6 +82,20 @@ export function scanSettingsXml(platen: PlatenSize, dpi: number): string {
 `;
 }
 
+export function clampRegion(platen: PlatenSize, region?: Region): Region {
+  if (!region) return { left: 0, top: 0, width: platen.width, height: platen.height };
+  const left = Math.max(0, Math.min(platen.width - 1, Math.round(region.left)));
+  const top = Math.max(0, Math.min(platen.height - 1, Math.round(region.top)));
+  const right = Math.min(platen.width, Math.round(region.left + region.width));
+  const bottom = Math.min(platen.height, Math.round(region.top + region.height));
+  return {
+    left,
+    top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+}
+
 export class EsclError extends Error {
   constructor(message: string) {
     super(message);
@@ -73,7 +105,7 @@ export class EsclError extends Error {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Scan the whole platen in colour into a JPEG at `outPath`. */
+/** Scan the platen (or a region of it) in colour into a JPEG at `outPath`. */
 export async function esclScanPlaten(
   baseUrl: string,
   outPath: string,
@@ -89,13 +121,16 @@ export async function esclScanPlaten(
   );
   if (caps?.ok) platen = parseCapabilities(await caps.text());
 
-  // A job posted while the scanner is still "Processing" (the carriage going
-  // back after the previous scan) is accepted, then cancelled: NextDocument
-  // answers 410 Gone. Wait for Idle first, and retry once if it happens anyway.
+  // The scanner cancels a job it cannot finish and NextDocument answers
+  // 410 Gone: one posted while it is still "Processing" (the carriage going
+  // back), or a dense 600 dpi full-platen scan that overruns its buffer. Wait
+  // for Idle first, and retry if it happens anyway.
+  const attempts = opts.attempts ?? 3;
+  const settings = scanSettingsXml(platen, opts.dpi, opts.region);
   for (let attempt = 1; ; attempt++) {
     await waitIdle(f, baseUrl, deadline, signal);
-    const result = await scanOnce(f, baseUrl, platen, opts.dpi, deadline, signal);
-    if (result.kind === "gone" && attempt < 3 && Date.now() < deadline) continue;
+    const result = await scanOnce(f, baseUrl, settings, deadline, signal);
+    if (result.kind === "gone" && attempt < attempts && Date.now() < deadline) continue;
     if (result.kind === "gone")
       throw new EsclError("scanner cancelled the scan job (HTTP 410)");
     await writeFile(outPath, result.body);
@@ -129,15 +164,14 @@ async function waitIdle(
 async function scanOnce(
   f: typeof fetch,
   baseUrl: string,
-  platen: PlatenSize,
-  dpi: number,
+  settings: string,
   deadline: number,
   signal: Signal,
 ): Promise<{ kind: "ok"; body: Buffer; jobUrl: string } | { kind: "gone" }> {
   const created = await f(`${baseUrl}/ScanJobs`, {
     method: "POST",
     headers: { "content-type": "text/xml" },
-    body: scanSettingsXml(platen, dpi),
+    body: settings,
     signal: signal(),
   });
   await created.arrayBuffer().catch(() => undefined);
