@@ -49,6 +49,8 @@ export const en = {
     'I could not find a photo on the glass, so this is the whole scan. Move the photo and press "Rescan" if needed.',
   photoReduced:
     "⚠️ The scanner could not do the high resolution this time, so this is 300 dpi. Rescan to try again.",
+  photoScanFailed:
+    'The scanner could not scan this time 😕 Check that it is on and the lid is closed, then press "Scan" again.',
   photoDropped: "Photo discarded.",
   askDate: (hasPrevious: boolean, previous?: string) =>
     "When was it taken, roughly?\n" +
@@ -73,8 +75,9 @@ export const en = {
   uploading: "Uploading to Immich…",
   uploaded: (link: string, count: number) =>
     `✅ In Immich: ${link}\nPhotos this session: ${count}.\n\nPut the next one on the glass and press "Scan", or "Finish".`,
-  albumFailed: (err: string) => `(Could not add it to the album: ${err})`,
-  uploadFailed: (err: string) => `Upload to Immich failed: ${err}`,
+  albumFailed: "(Uploaded, but could not add it to the album.)",
+  uploadFailed:
+    'Could not upload to Immich 😕 The photo and your answers are kept — press "Retry upload".',
   photoFinished: (count: number) => `Done, photos uploaded: ${count}.`,
   photoDescription: (date?: { label: string; exact: boolean }, place?: string) =>
     [
@@ -117,6 +120,7 @@ export const en = {
     photoDrop: "🗑 Discard",
     placeOk: "✅ Yes",
     placeRetry: "✏️ Another place",
+    uploadRetry: "🔁 Retry upload",
     placeNoGeo: "📝 Without coordinates",
     scanPage: "➕ Scan page",
     scanAdf: "📚 Scan feeder",

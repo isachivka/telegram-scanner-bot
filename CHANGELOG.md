@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.3 — 2026-11-05
+
+- Photo mode speaks plainly when something fails: a failed scan says to check the scanner and press "Scan" again instead of showing `scanner cancelled the scan job (HTTP 410)`; details stay in the log, logged once instead of again on every later message.
+- A failed Immich upload keeps the photo and the answers and offers "Retry upload" / "Discard".
+
 ## 1.2.2 — 2026-11-05
 
 - Photo scans over eSCL take two passes: the whole platen at 300 dpi to find the photo, then only the photo's region at `PHOTO_DPI`. The HP Laser MFP 135w cancels a full-platen 600 dpi job (410 Gone, `JobCanceledByTimeOut`) as soon as the picture is dense from the top — a photo in the corner of the glass — but scans a photo-sized region at 600 dpi fine. It is also faster: ~34 s instead of ~40 s.
