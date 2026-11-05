@@ -186,19 +186,32 @@ export function photoSession(env: BotEnv) {
           ]);
           const data = c.callbackQuery!.data;
           if (data === CB.photoRotate) {
-            await c.answerCallbackQuery();
-            rotation = ((rotation + 90) % 360) as Rotation;
-            const r = rotation;
+            const r = ((rotation + 90) % 360) as Rotation;
             const src = rawPath;
-            await conv.external(() =>
-              renderPreview(src, previewPath, { box, rotation: r }),
-            );
-            await ctx.api.editMessageMedia(
-              preview.chat.id,
-              preview.message_id,
-              InputMediaBuilder.photo(new InputFile(previewPath), { caption }),
-              { reply_markup: photoPreviewKb(t) },
-            );
+            // A failure here must not end the conversation: report it, keep going.
+            const ok = await conv.external(async () => {
+              try {
+                await renderPreview(src, previewPath, { box, rotation: r });
+                return true;
+              } catch (err) {
+                log.error({ err }, "rotating the preview failed");
+                return false;
+              }
+            });
+            if (!ok) {
+              await c.answerCallbackQuery({ text: t.rotateFailed, show_alert: true });
+              continue;
+            }
+            await c.answerCallbackQuery();
+            rotation = r;
+            await ctx.api
+              .editMessageMedia(
+                preview.chat.id,
+                preview.message_id,
+                InputMediaBuilder.photo(new InputFile(previewPath), { caption }),
+                { reply_markup: photoPreviewKb(t) },
+              )
+              .catch(() => {});
             continue;
           }
           await ctx.api

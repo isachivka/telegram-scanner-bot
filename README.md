@@ -154,7 +154,7 @@ Anyone not in `ALLOWED_USER_IDS` is refused and shown their ID, so onboarding a 
 Set `IMMICH_URL` and an API key (see [Configuration](#paper-photos--immich-1)) and the main menu gets **🖼 Photo → Immich**. One photo at a time:
 
 1. Put **one** photo face down on the glass, close the lid, tap **📷 Scan**. The glass is scanned at 300 dpi to find the photo, then the photo alone in colour at `PHOTO_DPI` (600 by default; ~35 s in total on an HP Laser MFP 135w).
-2. The bot finds the photo on the white lid, crops it and shows a preview. **🔄 Rotate** turns it by 90°, **🔁 Rescan** scans again, **🗑 Discard** drops it, **✅ Next** goes on. A photo pushed into a corner of the glass is fine; an empty glass gives the whole scan back.
+2. The bot finds the photo on the white lid, straightens it if it lies askew, crops it tightly and shows a preview. **🔄 Rotate** turns it by 90°, **🔁 Rescan** scans again, **🗑 Discard** drops it, **✅ Next** goes on. A photo pushed into a corner of the glass is fine; an empty glass gives the whole scan back.
 3. _When was it taken, roughly?_ Anything like `12.05.1987`, `05.1987`, `May 1987`, `май 1987`, `summer 87`, `лето 87`, `1987`, `80s`, `80-е`, `late 70s`, `конец 70-х`. `-` = unknown, `=` = same as the previous photo.
 4. _Where?_ A city, a place or an address. It is looked up on OpenStreetMap ([Nominatim](https://nominatim.org)); confirm the match, try another wording, or keep the place as text only. `-` and `=` work here too.
 5. The photo is uploaded with:

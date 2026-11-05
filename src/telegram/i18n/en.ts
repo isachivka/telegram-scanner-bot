@@ -51,6 +51,8 @@ export const en = {
     "⚠️ The scanner could not do the high resolution this time, so this is 300 dpi. Rescan to try again.",
   photoScanFailed:
     'The scanner could not scan this time 😕 Check that it is on and the lid is closed, then press "Scan" again.',
+  rotateFailed:
+    "Could not rotate this time — press Next, the photo can be rotated in Immich.",
   photoDropped: "Photo discarded.",
   askDate: (hasPrevious: boolean, previous?: string) =>
     "When was it taken, roughly?\n" +

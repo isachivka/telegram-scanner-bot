@@ -4,6 +4,8 @@
 
 - Photo mode speaks plainly when something fails: a failed scan says to check the scanner and press "Scan" again instead of showing `scanner cancelled the scan job (HTTP 410)`; details stay in the log, logged once instead of again on every later message.
 - A failed Immich upload keeps the photo and the answers and offers "Retry upload" / "Discard".
+- **Rotate crashed the session** ("extract_area: bad extract area") when the crop filled most of a landscape scan: in one sharp chain with `resize()` the rotation ran before the extract. Crop and rotate are now separate pipelines, and a failing rotate only shows an alert.
+- **Tighter crops.** The 600 dpi region scan is not where the 300 dpi pass saw the photo (~2 mm off on an HP 135w), so the photo is found again in it against the lid colour of the first pass; each edge is pulled past the paper's soft shadow (~1 mm); and a photo lying askew is measured (median slope of its four sides) and straightened before cropping, so no white wedges remain in the corners.
 
 ## 1.2.2 — 2026-11-05
 

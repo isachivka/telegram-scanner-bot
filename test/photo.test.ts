@@ -4,7 +4,13 @@ import path from "node:path";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSameAnswer, isUnknownAnswer, parseApproxDate } from "../src/photo/dates.js";
-import { detectPhoto, renderPhoto } from "../src/photo/crop.js";
+import {
+  cropPhoto,
+  detectPhoto,
+  locatePhoto,
+  renderPhoto,
+  renderPreview,
+} from "../src/photo/crop.js";
 import { esclScanPlaten, parseCapabilities } from "../src/core/escl.js";
 import { ImmichClient } from "../src/photo/immich.js";
 import { geocode } from "../src/photo/geocode.js";
@@ -194,6 +200,112 @@ describe("photo detection", () => {
   });
 });
 
+describe("crop regressions from real scans", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "crop-reg-"));
+  });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("rotates a preview whose box fills a landscape image (bad extract area)", async () => {
+    const file = path.join(dir, "land.jpg");
+    await sharp({
+      create: {
+        width: 3667,
+        height: 2496,
+        channels: 3,
+        background: { r: 120, g: 90, b: 60 },
+      },
+    })
+      .jpeg()
+      .toFile(file);
+    const box = { left: 0, top: 0, width: 3572, height: 2396 };
+    for (const rotation of [0, 90, 180, 270] as const) {
+      const out = path.join(dir, `r${rotation}.jpg`);
+      await renderPreview(file, out, { box, rotation });
+      const m = await sharp(out).metadata();
+      const landscape = rotation % 180 === 0;
+      expect(m.width! > m.height!).toBe(landscape);
+    }
+  });
+
+  /** A photo turned by `angle` degrees on a white lid, with a soft shadow rim. */
+  async function askew(name: string, angle: number) {
+    const photo = await sharp({
+      create: {
+        width: 1800,
+        height: 1200,
+        channels: 3,
+        background: { r: 110, g: 80, b: 55 },
+      },
+    })
+      .extend({
+        top: 6,
+        bottom: 6,
+        left: 6,
+        right: 6,
+        background: { r: 225, g: 225, b: 225 },
+      })
+      .png()
+      .toBuffer();
+    const turned = await sharp(photo)
+      .rotate(angle, { background: { r: 250, g: 250, b: 249 } })
+      .png()
+      .toBuffer();
+    const file = path.join(dir, name);
+    await sharp({
+      create: {
+        width: 2600,
+        height: 2000,
+        channels: 3,
+        background: { r: 250, g: 250, b: 249 },
+      },
+    })
+      .composite([{ input: turned, left: 300, top: 300 }])
+      .jpeg({ quality: 92 })
+      .toFile(file);
+    return file;
+  }
+
+  it("measures how far a photo is turned", async () => {
+    for (const angle of [-2, 0.8, 3]) {
+      const located = await locatePhoto(await askew(`a${angle}.jpg`, angle));
+      expect(Math.abs(located.skew - angle)).toBeLessThan(0.2);
+    }
+  });
+
+  it("straightens and crops a turned photo without lid or shadow at the edges", async () => {
+    const file = await askew("turned.jpg", 2);
+    const bg = (await locatePhoto(file)).background;
+    const c = await cropPhoto(file, path.join(dir, "straight.jpg"), bg, 600);
+    expect(c.file).toMatch(/straight\.jpg$/);
+    const out = path.join(dir, "final.jpg");
+    await renderPhoto(c.file, out, { box: c.box, rotation: 0 });
+    const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    const lum = (x: number, y: number) => {
+      const i = (y * info.width + x) * info.channels;
+      return (data[i]! + data[i + 1]! + data[i + 2]!) / 3;
+    };
+    // every corner and edge midpoint is photo (≈82), not lid (≈250) or rim (225)
+    const W = info.width - 1;
+    const H = info.height - 1;
+    for (const [x, y] of [
+      [0, 0],
+      [W, 0],
+      [0, H],
+      [W, H],
+      [W >> 1, 0],
+      [W >> 1, H],
+      [0, H >> 1],
+      [W, H >> 1],
+    ] as Array<[number, number]>) {
+      expect(lum(x, y)).toBeLessThan(140);
+    }
+    expect(Math.abs(info.width - 1800)).toBeLessThan(40);
+    expect(Math.abs(info.height - 1200)).toBeLessThan(40);
+  });
+});
+
 describe("eSCL photo scan", () => {
   it("posts a full-platen job at the requested dpi and saves the document", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "escl-test-"));
@@ -341,14 +453,31 @@ describe("two-pass photo scan", () => {
         if (failHires) return new Response(null, { status: 410 });
         const w = Number(xml.match(/<pwg:Width>(\d+)/)![1]);
         const h = Number(xml.match(/<pwg:Height>(\d+)/)![1]);
+        // The region at 600 dpi: lid around the photo (offset as requested).
+        const ox = Number(xml.match(/<pwg:XOffset>(\d+)/)![1]);
+        const oy = Number(xml.match(/<pwg:YOffset>(\d+)/)![1]);
         const img = await sharp({
           create: {
             width: w * 2,
             height: h * 2,
             channels: 3,
-            background: { r: 120, g: 90, b: 60 },
+            background: { r: 252, g: 252, b: 250 },
           },
         })
+          .composite([
+            {
+              input: {
+                create: {
+                  width: 2400,
+                  height: 3600,
+                  channels: 3,
+                  background: { r: 120, g: 90, b: 60 },
+                },
+              },
+              left: (600 - ox) * 2,
+              top: (900 - oy) * 2,
+            },
+          ])
           .jpeg()
           .toBuffer();
         return new Response(new Uint8Array(img));
