@@ -89,12 +89,58 @@ export async function esclScanPlaten(
   );
   if (caps?.ok) platen = parseCapabilities(await caps.text());
 
+  // A job posted while the scanner is still "Processing" (the carriage going
+  // back after the previous scan) is accepted, then cancelled: NextDocument
+  // answers 410 Gone. Wait for Idle first, and retry once if it happens anyway.
+  for (let attempt = 1; ; attempt++) {
+    await waitIdle(f, baseUrl, deadline, signal);
+    const result = await scanOnce(f, baseUrl, platen, opts.dpi, deadline, signal);
+    if (result.kind === "gone" && attempt < 3 && Date.now() < deadline) continue;
+    if (result.kind === "gone")
+      throw new EsclError("scanner cancelled the scan job (HTTP 410)");
+    await writeFile(outPath, result.body);
+    // Ask for the next page so the scanner closes the job (it answers 404).
+    await f(`${result.jobUrl}/NextDocument`, { signal: AbortSignal.timeout(10_000) })
+      .then((r) => r.arrayBuffer())
+      .catch(() => undefined);
+    return;
+  }
+}
+
+type Signal = () => AbortSignal;
+
+async function waitIdle(
+  f: typeof fetch,
+  baseUrl: string,
+  deadline: number,
+  signal: Signal,
+): Promise<void> {
+  while (Date.now() < deadline) {
+    const res = await f(`${baseUrl}/ScannerStatus`, { signal: signal() }).catch(
+      () => undefined,
+    );
+    if (!res?.ok) return; // cannot tell; just try
+    const state = (await res.text()).match(/<pwg:State>\s*(\w+)/)?.[1];
+    if (!state || state === "Idle") return;
+    await sleep(1500);
+  }
+}
+
+async function scanOnce(
+  f: typeof fetch,
+  baseUrl: string,
+  platen: PlatenSize,
+  dpi: number,
+  deadline: number,
+  signal: Signal,
+): Promise<{ kind: "ok"; body: Buffer; jobUrl: string } | { kind: "gone" }> {
   const created = await f(`${baseUrl}/ScanJobs`, {
     method: "POST",
     headers: { "content-type": "text/xml" },
-    body: scanSettingsXml(platen, opts.dpi),
+    body: scanSettingsXml(platen, dpi),
     signal: signal(),
   });
+  await created.arrayBuffer().catch(() => undefined);
   if (created.status === 503) throw new EsclError("scanner is busy (eSCL 503)");
   if (created.status !== 201) {
     throw new EsclError(`scanner refused the scan job (HTTP ${created.status})`);
@@ -108,13 +154,17 @@ export async function esclScanPlaten(
   while (true) {
     const doc = await f(`${jobUrl}/NextDocument`, { signal: signal() });
     if (doc.status === 503 && Date.now() < deadline) {
+      await doc.arrayBuffer().catch(() => undefined);
       await sleep(1000);
       continue;
+    }
+    if (doc.status === 410) {
+      await doc.arrayBuffer().catch(() => undefined);
+      return { kind: "gone" };
     }
     if (!doc.ok) throw new EsclError(`scan failed (HTTP ${doc.status})`);
     const body = Buffer.from(await doc.arrayBuffer());
     if (body.length === 0) throw new EsclError("scanner returned an empty image");
-    await writeFile(outPath, body);
-    return;
+    return { kind: "ok", body, jobUrl };
   }
 }

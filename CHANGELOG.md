@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1 — 2026-11-05
+
+- eSCL photo scans close their job (the trailing `NextDocument` → 404). Left open, an HP Laser MFP 135w stays "Processing" for ~90 s until it times the job out, and cancels any job posted meanwhile with 410 Gone — so a second photo right after the first failed.
+- Wait for the scanner to report Idle before posting a job, and retry a job the scanner cancelled (410).
+
 ## 1.2.0 — 2026-11-05
 
 - **Paper photos → Immich.** New main-menu mode: scan one photo at a time at the scanner's optical resolution (`PHOTO_DPI`, 600 by default, talking eSCL directly so SANE's advertised-resolution list does not cap it), crop it out of the white lid, rotate, answer roughly when ("summer 87", "late 70s", "-") and where (geocoded through Nominatim) it was taken, and upload it to Immich with that date, location, a description and an album shared with the family.
