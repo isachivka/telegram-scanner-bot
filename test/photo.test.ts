@@ -337,7 +337,7 @@ describe("two-pass photo scan", () => {
         if (seenDoc.has(m[1]!)) return new Response(null, { status: 404 });
         seenDoc.add(m[1]!);
         const dpi = Number(xml.match(/XResolution>(\d+)/)![1]);
-        if (dpi === 300) return new Response(platen);
+        if (dpi === 300) return new Response(new Uint8Array(platen));
         if (failHires) return new Response(null, { status: 410 });
         const w = Number(xml.match(/<pwg:Width>(\d+)/)![1]);
         const h = Number(xml.match(/<pwg:Height>(\d+)/)![1]);
@@ -351,7 +351,7 @@ describe("two-pass photo scan", () => {
         })
           .jpeg()
           .toBuffer();
-        return new Response(img);
+        return new Response(new Uint8Array(img));
       }
       return new Response(null, { status: 404 });
     };
